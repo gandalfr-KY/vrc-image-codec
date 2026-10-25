@@ -21,6 +21,8 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
     [Range(0, 100)]
     public int quality = DefaultQuality;
     public float frameBudgetMs = 2;
+    // Optional speed/size tradeoff: fixed probability models preserve reconstructed pixels.
+    public bool disableCdfUpdate;
     public TernaryAvifGpuTransform gpuTransform;
     private byte[] packedCoefficients;
     [HideInInspector]
@@ -248,6 +250,8 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
             low <<= d;
             range <<= d;
         }
+        if (disableCdfUpdate)
+            return;
         int at = countBase + offset, count = adaptationCounts[at];
         if (count < 0)
             return;
@@ -311,12 +315,15 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
         else
         {
             range -= ((range >> 8) * (uint)((32768 - partition8Cdf) >> 6) >> 1) + 12;
-            int delta = (32768 - partition8Cdf) >> (5 + (partition8Count >> 4));
-            partition8Cdf += delta;
-            if (partition8Count < 32)
-                partition8Count++;
-            else if (delta == 0)
-                partition8Stable = true;
+            if (!disableCdfUpdate)
+            {
+                int delta = (32768 - partition8Cdf) >> (5 + (partition8Count >> 4));
+                partition8Cdf += delta;
+                if (partition8Count < 32)
+                    partition8Count++;
+                else if (delta == 0)
+                    partition8Stable = true;
+            }
         }
         if (range < 32768)
         {
@@ -501,6 +508,8 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
             low <<= d;
             range <<= d;
         }
+        if (disableCdfUpdate)
+            return;
         int count = adaptationCounts[index], rate = (count >> 4) + (length > 2 ? 1 : 0);
         smallCdf[index] = Vector3Int.FloorToInt((Vector3)cdf * cdfFactors[rate] + cdfBias[rate * 4 + symbol]);
         if (count < 32)
@@ -530,6 +539,8 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
             low <<= d;
             range <<= d;
         }
+        if (disableCdfUpdate)
+            return;
         {
             int at = countBase + offset, count = adaptationCounts[at];
             int rate = 4 + (count >> 4) + (length > 2 ? 1 : 0);
@@ -728,7 +739,7 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
     {
         header = new byte[64];
         headerBits = 0;
-        HeaderBits(0, 1);
+        HeaderBits(disableCdfUpdate ? 1 : 0, 1);
         HeaderBits(0, 1);
         HeaderBits(0, 1);
         HeaderBits(1, 1);

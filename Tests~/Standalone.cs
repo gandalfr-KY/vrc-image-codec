@@ -113,6 +113,7 @@ class Program
         e.width = int.Parse(args[1]);
         e.height = int.Parse(args[2]);
         e.quality = int.Parse(args[4]);
+        e.disableCdfUpdate = args.Length > 6 && args[6] == "frozen";
         e.frameBudgetMs = float.Parse(args[5], System.Globalization.CultureInfo.InvariantCulture);
         e.gpuTransform = new TernaryStars.TernaryAvifGpuTransform();
         if (args.Length > 6 && args[6] == "missing")

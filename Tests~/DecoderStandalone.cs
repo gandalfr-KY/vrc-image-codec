@@ -24,6 +24,16 @@ class DecoderTest
     static int Main(string[] args)
     {
         var decoder = new TernaryStars.TernaryAvifDecoder();
+        if (args.Length > 3)
+        {
+            decoder.inputAvif = File.ReadAllBytes(args[3]);
+            decoder.material = new UnityEngine.Material();
+            decoder.BeginDecoding();
+            while (decoder.busy)
+                decoder.StepDecoding();
+            if (!decoder.complete)
+                return 3;
+        }
         decoder.inputAvif = File.ReadAllBytes(args[0]);
         decoder.material = new UnityEngine.Material();
         decoder.BeginDecoding();

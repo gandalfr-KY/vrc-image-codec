@@ -28,6 +28,7 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
     private byte[] data, coefficients;
     private int[] levels, signs, predictionModes, adaptationCounts, coefficientValues;
     private bool[] skippedBlocks;
+    private bool disableCdfUpdate;
     private int cols, rows, sbCols, sbRows, cursor, stage, at, end, bitAt, headerEnd, quantizerIndex, qctx;
     private uint difference, range;
     private int rangeCount, partition8Cdf, partition8Count;
@@ -307,8 +308,8 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
         }
         bitAt = at * 8;
         headerEnd = end;
-        // The encoder subset fixes all frame features except the base quantizer.
-        Expect(0, 1);
+        // Probability adaptation is signaled per image; reconstruction is unchanged.
+        disableCdfUpdate = Bits(1) != 0;
         Expect(0, 1);
         Expect(0, 1);
         Expect(1, 1);
@@ -392,7 +393,10 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
     }
     private int Adaptive(int[] cdf, int countBase, int offset, int length)
     {
-        int symbol = Symbol(cdf, offset, length), index = countBase + offset, count = adaptationCounts[index];
+        int symbol = Symbol(cdf, offset, length);
+        if (disableCdfUpdate)
+            return symbol;
+        int index = countBase + offset, count = adaptationCounts[index];
         int rate = 4 + (count >> 4) + (length > 2 ? 1 : 0);
         for (int i = 0; i < length; i++)
         {
@@ -437,6 +441,8 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
         range = previous - next;
         if (range < 32768)
             Normalize();
+        if (disableCdfUpdate)
+            return symbol;
         int count = adaptationCounts[index], rate = (count >> 4) + (length > 2 ? 1 : 0);
         smallCdf[index] = Vector3Int.FloorToInt((Vector3)cdf * cdfFactors[rate] + cdfBias[rate * 4 + symbol]);
         if (count < 32)
@@ -524,6 +530,8 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
         difference -= split << 16;
         range -= split;
         Normalize();
+        if (disableCdfUpdate)
+            return;
         partition8Cdf += (32768 - partition8Cdf) >> (5 + (partition8Count >> 4));
         if (partition8Count < 32)
             partition8Count++;

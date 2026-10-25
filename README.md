@@ -28,9 +28,11 @@ Editor code can call `VrcAvif.Encoder.Editor.AvifEncoderSetup.Configure(encoder,
 
 The matching decoder scheduling API is `AvifEncoderSetup.Configure(decoder, load)`. Both accept `AvifProcessingLoad.Gentle`, `Normal` and `Fast`, with soft CPU budgets of 1, 2 and 4 ms per frame respectively. Encoder GPU diagonals per frame are 2/4/8; decoder reconstruction diagonals are 4/8/16. `Fast` reduces frame scheduling waits at a higher per-frame cost; it does not change quality or the AVIF bitstream. Normal remains the default. These are time budgets within a frame, not one block per frame.
 
+Set `encoder.disableCdfUpdate = true` before starting to skip probability-model adaptation. The decoder detects this flag from each image automatically. Leave it false for the default, smaller output. This option preserves reconstructed pixels, but the measured Full HD scenes grew 27–37% while Udon entropy time fell 36–38%. The 100,000-byte limit still applies. Keep this setting unchanged while encoding. It is independent of the scheduling load setting.
+
 The encoder GPU performs prediction, transform, quantization and mode selection. One coefficient readback feeds Udon entropy coding and AVIF packaging. The decoder parses headers and entropy-decodes on Udon, uploads packed coefficients once, and reconstructs/predicts/filters on the GPU without a production GPU readback. `frameBudgetMs` is a soft CPU budget; allocation and GPU submission may exceed it. `diagonalsPerFrame` controls decoder reconstruction scheduling.
 
-The decoder accepts this encoder's restricted still-image profile, not general AVIF from arbitrary software: 8-bit SDR, 4:2:0, fixed 8×8 luma / 4×4 chroma transforms, one image, known headers, at most Full HD and 100,000 bytes. Unsupported headers fail through `error`. Alpha, HDR, animation, other block layouts and arbitrary libaom output are outside this API. RGB output is sRGB with nearest chroma upsampling; YUV reconstruction is independently checked against FFmpeg.
+The decoder accepts this encoder's restricted still-image profile, not general AVIF from arbitrary software: 8-bit SDR, 4:2:0, fixed 8×8 luma / 4×4 chroma transforms, one image, one tile, known headers, at most Full HD and 100,000 bytes. Unsupported headers fail through `error`. Alpha, HDR, animation, other block layouts and arbitrary libaom output are outside this API. RGB output is sRGB with nearest chroma upsampling; YUV reconstruction is independently checked against FFmpeg.
 
 There is no JPEG fallback, network call, URL handling, encryption, synchronization or storage dependency. Class names, package ID and existing asset GUIDs are retained so scenes can resolve moved scripts.
 
@@ -40,6 +42,6 @@ Copy Samples~/MinimalCamera into Assets. Add MinimalAvifCapture alongside the en
 
 ## Verification and releases
 
-`python Tools~/check-codec.py` replays recorded GPU coefficient fixtures against exact AVIF reference bytes and decodes them independently with FFmpeg. `python Tools~/check-decoder.py` checks production entropy decoding against every recorded coefficient, cancellation/reuse and malformed inputs. They require Mono C#; encoder reference validation also needs FFmpeg. On Windows, `python Tools~/check-shaders.py` compiles all production shader entrypoints with D3DCompiler. These checks do not replace Unity/Udon GPU integration tests.
+`python Tools~/check-codec.py` replays recorded GPU coefficient fixtures against exact AVIF reference bytes and decodes them independently with FFmpeg. `python Tools~/check-decoder.py` checks production entropy decoding against every recorded coefficient, cancellation/reuse, adaptive/frozen probability models and malformed inputs. They require Mono C#; encoder reference validation also needs FFmpeg. On Windows, `python Tools~/check-shaders.py` compiles all production shader entrypoints with D3DCompiler. These checks do not replace Unity/Udon GPU integration tests.
 
 `python Tools~/pack.py` creates a VPM package zip and GUID-preserving unitypackage under release/. Tests, build tools and optional samples are excluded from the installed package; the sample is included separately in the zip under Samples~.

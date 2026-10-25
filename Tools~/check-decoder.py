@@ -108,6 +108,76 @@ with tempfile.TemporaryDirectory(prefix="avif-decoder-") as directory:
         subprocess.run([MONO, str(exe), str(image), str(output)], check=True)
         compare(output.read_bytes(), packet.read_bytes(), 360, 640)
         cases += 1
+    frozen_cases = [
+        (
+            temp / f"quality-{quality}.avif",
+            temp / "orange/library.packed.rgba",
+            360,
+            640,
+            quality,
+        )
+        for quality in [0, 90, 100]
+    ] + [
+        (temp / f"fhd/{scene}.avif", temp / f"fhd/{scene}.packed.rgba", 1920, 1080, 60)
+        for scene in ["library", "bar", "lounge"]
+    ]
+    for baseline, packet, width, height, quality in frozen_cases:
+        image = temp / "frozen.avif"
+        output = temp / "coefficients.rgba"
+        subprocess.run(
+            [
+                MONO,
+                str(encoder),
+                str(packet),
+                str(width),
+                str(height),
+                str(image),
+                str(quality),
+                "2",
+                "frozen",
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
+        subprocess.run(
+            [MONO, str(exe), str(image), str(output), "cancel", str(baseline)],
+            check=True,
+        )
+        compare(output.read_bytes(), packet.read_bytes(), width, height)
+        decoded = []
+        for source in [baseline, image]:
+            decoded.append(
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-v",
+                        "error",
+                        "-threads",
+                        "1",
+                        "-i",
+                        str(source),
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-f",
+                        "rawvideo",
+                        "-",
+                    ],
+                    capture_output=True,
+                    check=True,
+                ).stdout
+            )
+        assert decoded[0] == decoded[1], (
+            width,
+            height,
+            quality,
+            "CDF mode changed pixels",
+        )
+        subprocess.run(
+            [MONO, str(exe), str(baseline), str(output), "cancel", str(image)],
+            check=True,
+        )
+        compare(output.read_bytes(), packet.read_bytes(), width, height)
+        cases += 1
     valid = (temp / "orange/library.avif").read_bytes()
     invalid = [
         b"",
