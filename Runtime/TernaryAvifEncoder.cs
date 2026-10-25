@@ -35,6 +35,8 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
     public int encodedBlocks, quantizerIndex;
     private byte[] buffer;
     private int[] levels, signs;
+    // Reuse coefficients across magnitude and sign passes; avoid unpacking every value twice.
+    private int[] coefficientValues = new int[64];
     private int cols, rows, sbCols, sbRows, cursor, stage, outputSize, qctx, qdc, qac;
     private float startedAt;
     private ulong low;
@@ -396,6 +398,7 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
         {
             int loc = scan[k], at = offset + loc * 4, word = BitConverter.ToInt32(packedCoefficients, at),
                 coefficient = (word & 65535) - 32768, abs = Mathf.Abs(coefficient);
+            coefficientValues[k] = coefficient;
             if (k == eob - 1)
             {
                 int ctx = k == 0 ? 0 : k <= total / 8 ? 1 : k <= total / 4 ? 2 : 3;
@@ -420,7 +423,7 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
                 }
             }
         }
-        int dc = (BitConverter.ToInt32(packedCoefficients, offset) & 65535) - 32768;
+        int dc = coefficientValues[0];
         if (dc != 0)
         {
             int net = (by > 0 ? signs[mi - cols * 3] : 0) + (bx > 0 ? signs[mi - 3] : 0), ctx = net == 0  ? 0
@@ -433,11 +436,11 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
         signs[mi] = dc == 0 ? 0 : dc < 0 ? -1 : 1;
         for (int k = 1; k < eob; k++)
         {
-            int value = (BitConverter.ToInt32(packedCoefficients, offset + scan[k] * 4) & 65535) - 32768;
+            int value = coefficientValues[k], magnitude = Mathf.Abs(value);
             if (value != 0)
                 UniformBit(value < 0 ? 1 : 0);
-            if (Mathf.Abs(value) >= 15)
-                Golomb(Mathf.Abs(value) - 15);
+            if (magnitude >= 15)
+                Golomb(magnitude - 15);
         }
     }
     private int FloorLog(int value)
@@ -609,7 +612,8 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
         // A normalized interval needs no shift, log lookup or byte emission.
         if (range < 32768)
         {
-            int d = range >= 256 ? 7 - logByte[(int)(range >> 8)] : 15 - logByte[(int)range];
+            // Splitting a normalized interval in half leaves 16380..32891: at most two shifts.
+            int d = range >= 16384 ? 1 : 2;
             rangeCount += d;
             if (rangeCount >= 40)
                 FlushRange(d);
