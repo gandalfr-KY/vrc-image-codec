@@ -55,6 +55,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 AOM AV1 reference implementation:
 
 Copyright (c) 2016, Alliance for Open Media. All rights reserved.
+Range decoder: Copyright (c) 2001-2016, Alliance for Open Media. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions

@@ -34,7 +34,7 @@ for shader in ["Av1Intra.shader"] if sys.argv[1:] else ["Av1Intra.shader"]:
     source = text.split("CGINCLUDE", 1)[1].split("ENDCG", 1)[0]
     source = source.replace(
         '#include "UnityCG.cginc"',
-        "struct v2f_img {float4 pos:SV_Position;float2 uv:TEXCOORD0;};struct appdata_img {float4 vertex:POSITION;float2 texcoord:TEXCOORD0;};v2f_img vert_img(appdata_img v){v2f_img o;o.pos=v.vertex;o.uv=v.texcoord;return o;}\nfloat LinearToGammaSpaceExact(float v){return pow(max(v,0),1./2.2);}",
+        "struct v2f_img {float4 pos:SV_Position;float2 uv:TEXCOORD0;};struct appdata_img {float4 vertex:POSITION;float2 texcoord:TEXCOORD0;};v2f_img vert_img(appdata_img v){v2f_img o;o.pos=v.vertex;o.uv=v.texcoord;return o;}\nfloat LinearToGammaSpaceExact(float v){return pow(max(v,0),1./2.2);}\nfloat3 GammaToLinearSpace(float3 v){return pow(max(v,0),2.2);}",
     )
     source = re.sub(
         r'#include "([^"]+)"', lambda m: (S / m[1]).read_text(encoding="utf-8"), source

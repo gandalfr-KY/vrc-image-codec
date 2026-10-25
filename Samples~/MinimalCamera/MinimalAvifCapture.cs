@@ -19,11 +19,5 @@ public class MinimalAvifCapture : UdonSharpBehaviour
         source.Render();
         encoder.BeginEncoding();
     }
-
-    private void Update()
-    {
-        if (encoder.busy)
-            encoder.StepEncoding();
-    }
 }
 }

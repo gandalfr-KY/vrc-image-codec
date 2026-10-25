@@ -432,6 +432,42 @@ float4 cdefFilter(v2f_img input):SV_Target{
    int block=xy.y*(int)_PhotoSize.z+xy.x,average=lumaAverage(block),alpha=slot-16;
    return float4(cflTrialCost(block,xy,1,alpha,average),cflTrialCost(block,xy,2,alpha,average),0,0);
   }
+  // Decoder input keeps signed coefficients in little-endian RG, with one upload per image.
+  Texture2D<float4> _DecodedTex;
+  int _DecodeChroma;
+  float4 decodedAt(int index){return _DecodedTex.Load(int3(index%(int)_PackedSize.x,index/(int)_PackedSize.x,0));}
+  float4 decodedModes(v2f_img i):SV_Target{
+   int2 p=min((int2)(i.uv*_PhotoSize.zw),(int2)_PhotoSize.zw-1);
+   int block=p.y*(int)_PhotoSize.z+p.x;
+   int4 y=(int4)round(decodedAt(block*99)*255.);
+   int4 u=(int4)round(decodedAt(block*99+65)*255.);
+   int4 v=(int4)round(decodedAt(block*99+82)*255.);
+   if(_DecodeChroma!=0)return float4(u.z,v.z,u.w,255)/255.;
+   return float4(y.z,y.w>>3,y.w&7,255)/255.;
+  }
+  float4 decodedQuant(v2f_img i):SV_Target{
+   int index=indexAt(i.uv),block,plane,n,local;int2 xy;identify(index,block,plane,n,local,xy);
+   if(xy.y>=(int)_PhotoSize.w||xy.x+2*xy.y!=_Diagonal||(_ChromaStage==0?plane!=0:plane==0))discard;
+   int planeOffset=plane==0?0:plane==1?65:82;
+   int2 bytes=(int2)round(decodedAt(block*99+planeOffset+1+local).rg*255.);
+   int coefficient=((bytes.x+(bytes.y<<8))<<16)>>16;
+   int dc=dcPrediction(block,plane,n,xy),pred;
+   if(plane==0){int2 code=(int2)round(_ModeTex.Load(int3(xy,0)).rg*255.);pred=predictor(block,8,0,code.x+(code.y<<4),local/8,local%8,dc);}
+   else{int uv=(int)round(_UvModeTex.Load(int3(xy,0)).b*255.);int alpha=(int)round(_CflTex.Load(int3(xy,0))[plane-1]*255.)-16;pred=uvPredict(block,xy,plane,uv,local/4,local%4,dc,alpha,lumaAverage(block));}
+   return packInt(coefficient,pred,0);
+  }
+  float4 decodedRgb(v2f_img i):SV_Target{
+   int2 pixel=min((int2)(i.uv*_PhotoSize.xy),(int2)_PhotoSize.xy-1);
+   int block=(pixel.y/8)*(int)_PhotoSize.z+pixel.x/8;
+   float y=rawAt(block,(pixel.y%8)*8+pixel.x%8)/255.;
+   float u=(rawAt(block,64+((pixel.y%8)/2)*4+(pixel.x%8)/2)-128)/255.;
+   float v=(rawAt(block,80+((pixel.y%8)/2)*4+(pixel.x%8)/2)-128)/255.;
+   float3 rgb=saturate(float3(y+1.402*v,y-.344136*u-.714136*v,y+1.772*u));
+   #ifndef UNITY_COLORSPACE_GAMMA
+    rgb=GammaToLinearSpace(rgb);
+   #endif
+   return float4(rgb,1);
+  }
   ENDCG
   Pass { CGPROGRAM
    #pragma target 5.0
@@ -517,6 +553,21 @@ float4 cdefFilter(v2f_img input):SV_Target{
    #pragma target 5.0
    #pragma vertex vertWave
    #pragma fragment cflCosts
+   ENDCG }
+  Pass { CGPROGRAM
+   #pragma target 5.0
+   #pragma vertex vert_img
+   #pragma fragment decodedModes
+   ENDCG }
+  Pass { CGPROGRAM
+   #pragma target 5.0
+   #pragma vertex vertWave
+   #pragma fragment decodedQuant
+   ENDCG }
+  Pass { CGPROGRAM
+   #pragma target 5.0
+   #pragma vertex vert_img
+   #pragma fragment decodedRgb
    ENDCG }
  }
 }

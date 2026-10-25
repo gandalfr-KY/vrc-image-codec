@@ -18,6 +18,26 @@ public enum AvifProcessingLoad
 }
 public static class AvifEncoderSetup
 {
+    [MenuItem("Tools/AVIF Encoder/Create decoder")]
+    public static void CreateDecoder()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Create the decoder outside Play mode.");
+        EnsurePrograms(typeof(TernaryAvifDecoder));
+        var root = new GameObject("AVIF decoder");
+        Undo.RegisterCreatedObjectUndo(root, "Create AVIF decoder");
+        var decoder = root.AddUdonSharpComponent<TernaryAvifDecoder>();
+        const string directory = "Assets/AvifEncoderGenerated";
+        Directory.CreateDirectory(directory);
+        AssetDatabase.Refresh();
+        decoder.material = new Material(Shader.Find("TernaryStars/Communication/AV1 Intra"));
+        AssetDatabase.CreateAsset(decoder.material, AssetDatabase.GenerateUniqueAssetPath(directory + "/Decoder.mat"));
+        UdonSharpEditorUtility.CopyProxyToUdon(decoder);
+        EditorUtility.SetDirty(decoder);
+        AssetDatabase.SaveAssets();
+        Selection.activeGameObject = root;
+        EditorSceneManager.MarkSceneDirty(root.scene);
+    }
     [MenuItem("Tools/AVIF Encoder/Create encoder")]
     public static void Create()
     {

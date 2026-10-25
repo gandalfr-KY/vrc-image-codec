@@ -1,9 +1,9 @@
 {
   "name": "com.gandalfr.vrc-avif",
-  "displayName": "VRC AVIF Encoder",
-  "version": "0.1.0",
+  "displayName": "VRC AVIF Codec",
+  "version": "0.2.0",
   "unity": "2022.3",
-  "description": "Single-image GPU AV1 encoding with UdonSharp entropy coding. No network, camera UX or encryption.",
+  "description": "Paired single-image AVIF encoding and decoding with UdonSharp and GPU reconstruction. No network or encryption.",
   "license": "BSD-2-Clause",
   "vpmDependencies": {
     "com.vrchat.worlds": ">=3.10.5"

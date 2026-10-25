@@ -25,6 +25,7 @@ with tempfile.TemporaryDirectory(prefix="avif-codec-") as temp:
             "/out:" + str(exe),
             str(ROOT / "Tests~/Standalone.cs"),
             str(ROOT / "Runtime/TernaryAvifEncoder.cs"),
+            str(ROOT / "Runtime/AvifTables.cs"),
         ],
         check=True,
     )
