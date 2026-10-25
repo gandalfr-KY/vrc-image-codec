@@ -55,6 +55,21 @@ public static class AvifEncoderSetup
     {
         return w >= 16 && h >= 16 && w <= 1920 && h <= 1920 && w % 8 == 0 && h % 8 == 0 && w * h <= 2073600;
     }
+    public static void Configure(TernaryAvifDecoder decoder, AvifProcessingLoad load = AvifProcessingLoad.Normal)
+    {
+        if (!decoder)
+            throw new ArgumentException("Select an AVIF decoder.");
+        if (load < AvifProcessingLoad.Gentle || load > AvifProcessingLoad.Fast)
+            throw new ArgumentException("Unsupported processing load.");
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Configure the decoder outside Play mode.");
+        Undo.RecordObject(decoder, "Configure AVIF decoding");
+        decoder.frameBudgetMs = load == AvifProcessingLoad.Gentle ? 1 : load == AvifProcessingLoad.Fast ? 4 : 2;
+        decoder.diagonalsPerFrame = load == AvifProcessingLoad.Gentle ? 4 : load == AvifProcessingLoad.Fast ? 16 : 8;
+        UdonSharpEditorUtility.CopyProxyToUdon(decoder);
+        EditorUtility.SetDirty(decoder);
+        EditorSceneManager.MarkSceneDirty(decoder.gameObject.scene);
+    }
     public static void Configure(TernaryAvifEncoder encoder, int w, int h, int q,
                                  AvifProcessingLoad load = AvifProcessingLoad.Normal)
     {
