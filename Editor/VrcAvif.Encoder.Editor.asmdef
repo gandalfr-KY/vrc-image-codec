@@ -1,0 +1,15 @@
+{
+  "name": "VrcAvif.Encoder.Editor",
+  "references": [
+    "VrcAvif.Encoder.Runtime",
+    "UdonSharp.Runtime",
+    "UdonSharp.Editor",
+    "VRC.Udon",
+    "VRC.Udon.Editor",
+    "VRC.Udon.Serialization.OdinSerializer"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "autoReferenced": true
+}

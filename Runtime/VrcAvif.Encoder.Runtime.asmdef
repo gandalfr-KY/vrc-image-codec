@@ -1,0 +1,11 @@
+{
+  "name": "VrcAvif.Encoder.Runtime",
+  "references": [
+    "UdonSharp.Runtime",
+    "VRC.SDKBase",
+    "VRC.SDK3",
+    "VRC.Udon",
+    "VRC.Udon.Serialization.OdinSerializer"
+  ],
+  "autoReferenced": true
+}
