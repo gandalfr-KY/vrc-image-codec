@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,7 +28,7 @@ def prepare(project):
         "Open Unity, wait for compilation, then Tools > Image Codec > Run benchmark (ClientSim)."
     )
     print(
-        "Or launch Unity with -batchmode -force-d3d11 -projectPath <project> -executeMethod CodecBenchmarkSetup.Run"
+        "Or launch Unity with -batchmode -projectPath <project> -executeMethod CodecBenchmarkSetup.Run (on Windows add -force-d3d11)"
     )
     print(
         "Do not use -quit or -nographics. Close the same project before batch launch."
@@ -223,7 +224,7 @@ def main():
             [
                 str(args.unity.resolve()),
                 "-batchmode",
-                "-force-d3d11",
+                *(["-force-d3d11"] if sys.platform == "win32" else []),
                 "-projectPath",
                 str(project),
                 "-executeMethod",

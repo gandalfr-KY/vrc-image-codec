@@ -14,7 +14,7 @@ Shader "VrcAvif/Range coding"
 // Restricted AV1 range coding, AOM-derived arithmetic. BSD-2-Clause + PATENTS.
 // Save state every 2048 symbols; each output word replays only its suffix.
 Texture2D<float4> _Tokens, _Headers, _Digits, _Counts, _Checkpoints;
-int _TokenCount, _QuantIndex, _QuantBit, _ByteTextureWidth;
+int _TokenCount, _QuantIndex, _QuantBit, _ByteTextureWidth, _CheckpointWidth;
 float4 _HeaderSizes, _HeaderPatch;
 static uint2 low;
 static uint range;
@@ -122,19 +122,24 @@ void FinishRange()
 float4 WriteCheckpoints(v2f_img pixel) : SV_Target
 {
     uint2 id = (uint2)pixel.pos.xy;
-    int slot = (int)id.x / 2;
+    int record = (int)id.y * _CheckpointWidth + (int)id.x;
+    int slot = record / 2;
     int count = _TokenCount;
     if (slot > (count + 2047) / 2048) return 0;
     int stop = min(slot * 2048, count);
     InitializeRange(-100);
     [loop] for (int i = 0; i < stop; i++) EncodeSymbol(ReadToken(i));
-    if ((id.x & 1u) == 0) return float4(low.x & 65535u, low.x >> 16, low.y & 65535u, low.y >> 16);
+    if ((record & 1) == 0) return float4(low.x & 65535u, low.x >> 16, low.y & 65535u, low.y >> 16);
     return float4(range, rangeCount, outputAt, stop);
+}
+float4 ReadCheckpoint(int record)
+{
+    return _Checkpoints.Load(int3(record % _CheckpointWidth, record / _CheckpointWidth, 0));
 }
 int RestoreCheckpoint(int slot, int target)
 {
-    float4 lo = _Checkpoints.Load(int3(slot * 2, 0, 0));
-    float4 state = _Checkpoints.Load(int3(slot * 2 + 1, 0, 0));
+    float4 lo = ReadCheckpoint(slot * 2);
+    float4 state = ReadCheckpoint(slot * 2 + 1);
     low = uint2((uint)lo.x | ((uint)lo.y << 16), (uint)lo.z | ((uint)lo.w << 16));
     range = (uint)state.x;
     rangeCount = (int)state.y;
@@ -162,7 +167,7 @@ float4 WriteDigits(v2f_img pixel) : SV_Target
     [loop] while (left < right)
     {
         int mid = (left + right + 1) / 2;
-        int position = (int)_Checkpoints.Load(int3(mid * 2 + 1, 0, 0)).z;
+        int position = (int)ReadCheckpoint(mid * 2 + 1).z;
         if (position <= target)
             left = mid;
         else

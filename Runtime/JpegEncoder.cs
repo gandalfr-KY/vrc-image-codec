@@ -6,7 +6,7 @@ using VRC.SDK3.Rendering;
 
 namespace VrcImageCodec
 {
-// JPEG image computation stays on the GPU. Read the exact length before allocating its output.
+// JPEG image computation stays on the GPU; one readback returns its length and encoded bytes.
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class JpegEncoder : UdonSharpBehaviour
 {
@@ -23,13 +23,9 @@ public class JpegEncoder : UdonSharpBehaviour
     public byte[] resultJpeg;
     [HideInInspector]
     public float progress, elapsedSeconds;
-    private RenderTexture rowTransforms, coefficients, segmentOffsets, scanScratch, output,
-        outputLengthTexture;
+    private RenderTexture rowTransforms, coefficients, segmentOffsets, scanScratch, output;
     private float startedAt;
     private byte[] readbackBuffer;
-    private byte[] lengthReadback = new byte[4];
-    private bool waitingForLength;
-    private int encodedLength;
 
     public void BeginEncoding()
     {
@@ -83,42 +79,38 @@ public class JpegEncoder : UdonSharpBehaviour
             scanScratch = swap;
         }
         material.SetTexture("_Prefix", segmentOffsets);
-        // DirectAssemble writes the length in its first pixel without emitting any JPEG payload.
-        outputLengthTexture = CodecBuffers.Surface(outputLengthTexture, 1, 1, RenderTextureFormat.ARGB32);
-        VRCGraphics.Blit(Texture2D.blackTexture, outputLengthTexture, material, 12);
-        waitingForLength = true;
+        // Baseline 8-bit JPEG: DC <= 11 amplitude bits, AC <= 10, Huffman codes <= 16.
+        // Each block therefore needs at most 27 + 63 * 26 bits. Pad each restart segment to
+        // a byte, allow FF/00 stuffing for every entropy byte, then add its restart marker.
+        // This is a capacity bound, not a limit on accepted image/output sizes.
+        int blocksPerMcu = subsampleChroma ? 6 : 3;
+        int segmentBytes = ((blocksPerMcu * (27 + 63 * 26) + 7) / 8) * 2 + 2;
+        // The fixed JFIF header is 629 bytes; the end-of-image marker occupies two bytes.
+        int capacity = 629 + mcuCount * segmentBytes + 2;
+        output = CodecBuffers.EncodedOutput(output, capacity, RenderTextureFormat.ARGB32);
+        material.SetInt("_OutputWidth", output.width);
+        VRCGraphics.Blit(Texture2D.blackTexture, output, material, 12);
+        int size = output.width * output.height * 4;
+        if (readbackBuffer == null || readbackBuffer.Length != size) readbackBuffer = new byte[size];
         readbackPending = true;
-        progress = .8f;
-        VRCAsyncGPUReadback.Request(outputLengthTexture, 0, TextureFormat.RGBA32, this);
+        progress = .9f;
+        VRCAsyncGPUReadback.Request(output, 0, TextureFormat.RGBA32, this);
     }
 
     public override void OnAsyncGpuReadbackComplete(VRCAsyncGPUReadbackRequest request)
     {
         readbackPending = false;
         if (!busy) return;
-        byte[] bytes = waitingForLength ? lengthReadback : readbackBuffer;
-        if (request.hasError || !request.TryGetData(bytes))
+        if (request.hasError || !request.TryGetData(readbackBuffer))
         {
             busy = false;
             error = "JPEG GPU readback failed.";
             return;
         }
-        if (waitingForLength)
-        {
-            encodedLength = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
-            output = CodecBuffers.EncodedOutput(output, encodedLength, RenderTextureFormat.ARGB32);
-            material.SetInt("_OutputWidth", output.width);
-            VRCGraphics.Blit(Texture2D.blackTexture, output, material, 12);
-            int size = output.width * output.height * 4;
-            if (readbackBuffer == null || readbackBuffer.Length != size) readbackBuffer = new byte[size];
-            waitingForLength = false;
-            readbackPending = true;
-            progress = .9f;
-            VRCAsyncGPUReadback.Request(output, 0, TextureFormat.RGBA32, this);
-            return;
-        }
+        int encodedLength = readbackBuffer[0] | (readbackBuffer[1] << 8) | (readbackBuffer[2] << 16) |
+                            (readbackBuffer[3] << 24);
         resultJpeg = new byte[encodedLength];
-        Array.Copy(bytes, CodecBuffers.LengthPrefixBytes, resultJpeg, 0, encodedLength);
+        Array.Copy(readbackBuffer, CodecBuffers.LengthPrefixBytes, resultJpeg, 0, encodedLength);
         busy = false;
         complete = true;
         progress = 1;
@@ -136,8 +128,7 @@ public class JpegEncoder : UdonSharpBehaviour
 
     private void OnDestroy()
     {
-        RenderTexture[] textures = { rowTransforms, coefficients, segmentOffsets,
-                                     scanScratch,   output,       outputLengthTexture };
+        RenderTexture[] textures = { rowTransforms, coefficients, segmentOffsets, scanScratch, output };
         CodecBuffers.Release(textures);
     }
 }

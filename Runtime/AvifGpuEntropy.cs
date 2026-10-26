@@ -106,8 +106,13 @@ public class AvifGpuEntropy : UdonSharpBehaviour
         VRCGraphics.Blit(Texture2D.blackTexture, cdfCheckpoints, cdfMaterial, 2);
         VRCGraphics.Blit(Texture2D.blackTexture, intervals, cdfMaterial, 3);
         VRCGraphics.Blit(Texture2D.blackTexture, resolvedTokens, cdfMaterial, 4);
-        rangeCheckpoints = CodecBuffers.Surface(rangeCheckpoints, 2 * ((count + 2047) / 2048 + 1), 1,
-                                                RenderTextureFormat.ARGBFloat);
+        // Two pixels per checkpoint, tiled rather than assuming a device's maximum texture width.
+        int checkpointPixels = 2 * ((count + 2047) / 2048 + 1);
+        int checkpointColumns = Mathf.Min(CodecBuffers.ByteTextureColumns, checkpointPixels);
+        rangeCheckpoints = CodecBuffers.Surface(
+            rangeCheckpoints, checkpointColumns,
+            (checkpointPixels + checkpointColumns - 1) / checkpointColumns, RenderTextureFormat.ARGBFloat);
+        rangeMaterial.SetInt("_CheckpointWidth", checkpointColumns);
         rangeCount = CodecBuffers.Surface(rangeCount, 1, 1, RenderTextureFormat.ARGBFloat);
         rangeMaterial.SetInt("_TokenCount", count);
         rangeMaterial.SetTexture("_Tokens", resolvedTokens);
@@ -169,11 +174,10 @@ public class AvifGpuEntropy : UdonSharpBehaviour
         int length = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
         if (readbackStage == SyntaxCountStage)
         {
-            // SM5 texture width (16384) bounds two RGBA checkpoint records per 2048 tokens.
-            if (length < 1 || length > (16384 / 2 - 1) * 2048)
+            if (length < 1)
             {
                 busy = false;
-                error = "AV1 syntax exceeds GPU texture capacity.";
+                error = "AV1 syntax is empty.";
                 return;
             }
             EncodeRecords(length);
