@@ -14,7 +14,32 @@ Resolution is a dropdown of width × height pairs that preserve the input aspect
 
 Call `ImageEncoder.BeginEncoding()` and observe `busy`, `complete`, `error` and `resultBytes`. Call `CancelEncoding()` to cancel. The supplied RenderTexture is resized into an internal snapshot before compression. After cancellation, wait for `readbackPending` to clear before restarting. The format-specific APIs below remain available for integrations that already configure their own resources.
 
-## API
+## Connect components without writing code
+
+Create an encoder and decoder with **Tools → Image Codec**, then add **Image Codec Link** to a UI Button (or create a standalone link through the same menu). Drag the Image Encoder into **Encoder**, the Image Decoder into **Decoder**, and your output RawImage into **Display**. A UI Button on the same object is connected automatically after those references are assigned. For a world object, add a collider and use it to invoke the link. In Play mode the Inspector also provides an **Encode & Decode** button and status.
+
+The link starts encoding, passes each completed byte array to the decoder without copying, and assigns the decoded RenderTexture to Display. It also forwards results when another component starts the encoder. Use one link per encoder/decoder pair; the link owns that decoder while processing. The encoder input must already contain the image you want to convert. No binary-string object, URL or file is required.
+
+## Unified decoder and data transfer
+
+Use **Tools → Image Codec → Create decoder**. `ImageDecoder` detects JPEG/AVIF from the bytes; there is no format, sampling or resolution setting. It delegates to the existing restricted-profile codecs, so their supported-format limits still apply.
+
+After `ImageEncoder.complete` becomes true:
+
+```csharp
+decoder.inputBytes = encoder.resultBytes;
+decoder.BeginDecoding();
+```
+
+Wait for `decoder.complete`, then assign `decoder.resultTexture` to a RawImage or material. Observe `busy`, `error` and `readbackPending`; cancel with `CancelDecoding()`. The transfer shares the byte array without copying. Keep input bytes unchanged during decoding. The decoder owns and reuses the result texture; use a GPU blit if an earlier result must be retained. Neither operation writes a file automatically.
+
+### Round-trip sample
+
+For a unitypackage install, also import the matching `-sample.unitypackage`. For a package install, import **Encode, decode and display** from Package Manager Samples (or copy `Samples~/RoundTrip` into Assets).
+
+Select a photograph in the Project window, then use **Tools → Image Codec → Create round-trip sample**. With no selected photograph, the tool creates a portable gradient/checker pattern. Enter Play mode and click **Encode & Decode**: the left image is the input; the right is the decoded result. The status displays Encoding, Decoding, then the actual byte count. The sample uses the same Image Codec Link component. Its small `CodecRoundTrip` script only prepares the source image and updates the status label. Its child Image encoder exposes the five codec settings. No server, URL, camera model or native plugin is needed.
+
+## Format-specific API
 
 Both components advance automatically in their own `Update`. Call Begin once and observe completion; do not also call Step every Update. Step is exposed for a caller that deliberately owns scheduling instead of the component's Update.
 
@@ -28,7 +53,7 @@ Both components advance automatically in their own `Update`. Call Begin once and
 | Result | `resultAvif` (`byte[]`) | `resultTexture` (`RenderTexture`) |
 | State | `busy`, `complete`, `error`, `progress` | `busy`, `complete`, `error`, `progress` |
 
-Render into `encoder.gpuTransform.inputTexture`, then call `encoder.BeginEncoding()`. When `complete` is true, pass `encoder.resultAvif` to `decoder.inputAvif` and call `decoder.BeginDecoding()`. When decoding completes, assign `decoder.resultTexture` to your display material. Create a configured decoder using **Tools → Image Codec → Create AVIF decoder**. Check `error` when an operation ends without completion.
+Render into `encoder.gpuTransform.inputTexture`, then call `encoder.BeginEncoding()`. When `complete` is true, pass `encoder.resultAvif` to `decoder.inputAvif` and call `decoder.BeginDecoding()`. When decoding completes, assign `decoder.resultTexture` to your display material. Create a configured decoder using **Tools → Image Codec → Create decoder**. Check `error` when an operation ends without completion.
 
 Keep input bytes unchanged while decoding. The decoder owns its output RenderTexture and reuses it on the next decode; copy it with a GPU blit if a previous image must be retained. Cancel clears the public result/state but keeps GPU allocations for reuse. After cancelling an encode, wait until `gpuEntropy.readbackPending` is false before starting again; for decoding, wait for `decoder.readbackPending == false`. All state is local.
 
@@ -62,7 +87,7 @@ Editor container/frame headers grow while being written; they have no 600/64-byt
 
 ## GPU JPEG API
 
-Use **Tools → Image Codec → Create encoder** and choose JPEG. Use **Tools → Image Codec → Create JPEG decoder** for the matching decoder. JPEG is an explicit alternative; it does not change an existing AVIF camera or its Web protocol.
+Use **Tools → Image Codec → Create encoder** and choose JPEG. Use **Tools → Image Codec → Create decoder** for the matching decoder. JPEG is an explicit alternative; it does not change an existing AVIF camera or its Web protocol.
 
 | Operation | Encoder | Decoder |
 | --- | --- | --- |

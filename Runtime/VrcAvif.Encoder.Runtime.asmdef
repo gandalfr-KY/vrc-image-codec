@@ -5,7 +5,8 @@
     "VRC.SDKBase",
     "VRC.SDK3",
     "VRC.Udon",
-    "VRC.Udon.Serialization.OdinSerializer"
+    "VRC.Udon.Serialization.OdinSerializer",
+    "Unity.ugui"
   ],
   "autoReferenced": true
 }

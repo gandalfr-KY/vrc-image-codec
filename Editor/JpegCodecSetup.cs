@@ -19,7 +19,6 @@ public static class JpegCodecSetup
         Configure(root.AddUdonSharpComponent<JpegDecoder>());
         Selection.activeGameObject = root;
     }
-    [MenuItem("Tools/Image Codec/Create JPEG decoder")]
     public static void CreateDecoder()
     {
         AvifEncoderSetup.EnsurePrograms(typeof(JpegDecoder));

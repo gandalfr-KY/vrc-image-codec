@@ -52,6 +52,19 @@ with tarfile.open(release / (name + ".unitypackage"), "w:gz") as package:
         )
         if asset.is_file():
             add(package, guid + "/asset", asset.read_bytes())
+# Optional sample stays separate from the runtime unitypackage.
+with tarfile.open(release / (name + "-sample.unitypackage"), "w:gz") as package:
+    for path in files:
+        relative = path.relative_to(ROOT).as_posix()
+        if not relative.endswith(".meta") or not (relative.startswith("Samples~/RoundTrip/") or relative == "Samples~/RoundTrip.meta"):
+            continue
+        guid = re.search(r"^guid: ([a-f0-9]{32})$", path.read_text(encoding="utf-8"), re.M)[1]
+        asset = Path(str(path)[:-5])
+        add(package, guid + "/asset.meta", path.read_bytes())
+        add(package, guid + "/pathname", ("Assets/ImageCodecSamples/" + relative[len("Samples~/"):-5]).encode())
+        if asset.is_file():
+            add(package, guid + "/asset", asset.read_bytes())
+
 for path in sorted(release.iterdir()):
     if path.suffix not in [".zip", ".unitypackage"]:
         continue

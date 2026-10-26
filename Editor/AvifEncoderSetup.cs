@@ -18,7 +18,6 @@ public enum AvifProcessingLoad
 }
 public static class AvifEncoderSetup
 {
-    [MenuItem("Tools/Image Codec/Create AVIF decoder")]
     public static void CreateDecoder()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
