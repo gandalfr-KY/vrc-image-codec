@@ -42,6 +42,14 @@ The decoder accepts this encoder's restricted still-image profile, not general A
 
 There is no automatic codec fallback, network call, URL handling, encryption, synchronization or storage dependency. The package ID and script GUIDs are retained. Codec classes now use neutral names in `VrcImageCodec`; update source references when upgrading.
 
+### Rate-distortion tuning and buffer layout
+
+The profile's `PredictionRateWeight = 0.07` is unchanged. Prediction screening and chroma RDO compare squared reconstruction error with estimated bit cost, weighted by the quantizer step squared times this coefficient. Higher weights favor shorter streams; lower weights favor reconstruction accuracy. This is profile tuning, not a quality percentage or an AV1 standard constant. Luma coefficient trellis uses its separate libaom-derived multiplier; table-based bit costs use 1/512-bit units. Unused legacy RDO constants and identical quantization-step wrappers are removed.
+
+AVIF encoding sizes its event buffers from the GPU event count and its final output from the GPU's exact encoded length. Decoder upload/packet textures scale with input length and block count. Fixed state sizes describe the shader layout: 4096 CDF contexts with four pixels each, two range/cursor pixels and two neighbour-context pixels per block. A coefficient packet has three plane headers plus 64 Y and two 16/64 U,V coefficient words (99/195 words). The 1024-column atlas layout is packing, not a file-size limit. CDF/range replay checkpoints every 256/2048 symbols are GPU scheduling choices, not input limits.
+
+Editor container/frame headers grow while being written; they have no 600/64-byte scratch reservations. Their four payload-length variants are packed into a texture sized from their actual lengths. Decoder container walking is bounded by input length and positive box sizes, without an arbitrary box-count or 300-byte minimum gate. Bounds, format, GPU failure and cancellation/readback ownership checks remain.
+
 ## GPU JPEG API
 
 Use **Tools → AVIF Encoder → Create JPEG codec** to create a configured pair. JPEG is an explicit alternative; it does not change an existing AVIF camera or its Web protocol.

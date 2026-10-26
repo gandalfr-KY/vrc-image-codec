@@ -31,14 +31,14 @@ int UvRate(int q[16],int end){
  return rate;
 }
 float OptimizeUv(int t[16],int plane,out int q[16]){
- int end=0;float distortion=0,lambda=(float)_QuantUvAc*_QuantUvAc*_RdScale/512.;
- [unroll]for(int k=0;k<16;k++){q[k]=QuantAt(t[k],plane,k);float d=t[k]-q[k]*StepAt(plane,k);distortion+=d*d;}
+ int end=0;float distortion=0,lambda=(float)_QuantUvAc*_QuantUvAc*PredictionRateWeight/512.;
+ [unroll]for(int k=0;k<16;k++){q[k]=QuantAt(t[k],plane,k);float d=t[k]-q[k]*StepBase(plane,k);distortion+=d*d;}
  [unroll]for(int k=0;k<16;k++)if(q[UvScan[k]]!=0)end=k+1;
  int rate=UvRate(q,end);
  [loop]for(int k=end-1;k>=0;k--){
   int ci=UvScan[k],original=q[ci];if(original==0)continue;
-  float d=t[ci]-original*StepAt(plane,ci);q[ci]+=original<0?1:-1;
-  float dn=t[ci]-q[ci]*StepAt(plane,ci);int newEnd=end;
+  float d=t[ci]-original*StepBase(plane,ci);q[ci]+=original<0?1:-1;
+  float dn=t[ci]-q[ci]*StepBase(plane,ci);int newEnd=end;
   [loop]while(newEnd>0&&q[UvScan[newEnd-1]]==0)newEnd--;
   int newRate=UvRate(q,newEnd);float change=dn*dn-d*d;
   if(change+lambda*(newRate-rate)<0){distortion+=change;rate=newRate;end=newEnd;}else q[ci]=original;

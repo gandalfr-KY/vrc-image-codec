@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEditor;
 using VrcImageCodec;
@@ -10,27 +11,33 @@ public class AvifContainerTemplate
 {
     private int width, height;
     private bool subsampleChroma;
-    private const int quantizerIndex = 0;
+    // Placeholder: the GPU assembler patches the per-image quantizer into this template.
+    private const int TemplateQuantizerIndex = 0;
     private Vector4 patch;
     public static void Configure(AvifGpuEntropy entropy, int width, int height, string directory)
     {
         var builder = new AvifContainerTemplate { width = width, height = height,
                                                   subsampleChroma = entropy.subsampleChroma };
-        var bytes = new byte[1024 * 4 * 4];
+        // Four LEB128 payload-length layouts, packed as one RGBA row per layout.
+        var headers = new byte[4][];
         var sizes = new Vector4();
-        for (int i = 0; i < 4; i++)
+        int columns = 0;
+        for (int i = 0; i < headers.Length; i++)
         {
-            var header = builder.Build(1 << (i * 7));
-            Buffer.BlockCopy(header, 0, bytes, i * 4096, header.Length);
-            sizes[i] = header.Length;
+            headers[i] = builder.Build(1 << (i * 7));
+            sizes[i] = headers[i].Length;
+            columns = Mathf.Max(columns, (headers[i].Length + 3) / 4);
         }
-        if (entropy.containerHeaders && entropy.containerHeaders.height != 4)
-        {
-            entropy.containerHeaders.Reinitialize(1024, 4, TextureFormat.RGBA32, false);
-        }
+        var bytes = new byte[columns * 4 * headers.Length];
+        for (int i = 0; i < headers.Length; i++)
+            Buffer.BlockCopy(headers[i], 0, bytes, i * columns * 4, headers[i].Length);
+        if (entropy.containerHeaders &&
+            (entropy.containerHeaders.width != columns || entropy.containerHeaders.height != headers.Length))
+            entropy.containerHeaders.Reinitialize(columns, headers.Length, TextureFormat.RGBA32, false);
         if (!entropy.containerHeaders)
         {
-            entropy.containerHeaders = new Texture2D(1024, 4, TextureFormat.RGBA32, false, true);
+            entropy.containerHeaders =
+                new Texture2D(columns, headers.Length, TextureFormat.RGBA32, false, true);
             entropy.containerHeaders.name = "AVIF container headers";
             entropy.containerHeaders.filterMode = FilterMode.Point;
             AssetDatabase.CreateAsset(entropy.containerHeaders, AssetDatabase.GenerateUniqueAssetPath(
@@ -44,19 +51,20 @@ public class AvifContainerTemplate
         EditorUtility.SetDirty(entropy.containerHeaders);
         EditorUtility.SetDirty(entropy.rangeMaterial);
     }
-    private byte[] file, header;
-    private int fileCursor, headerBits;
+    private List<byte> file, header;
+    private int headerBits;
     private void WriteHeaderBits(int value, int count)
     {
         for (int k = count - 1; k >= 0; k--)
         {
-            if (((value >> k) & 1) != 0) header[headerBits >> 3] |= (byte)(1 << (7 - (headerBits & 7)));
+            if ((headerBits & 7) == 0) header.Add(0);
+            header[headerBits >> 3] |= (byte)(((value >> k) & 1) << (7 - (headerBits & 7)));
             headerBits++;
         }
     }
     private byte[] SequenceHeader()
     {
-        header = new byte[64];
+        header = new List<byte>();
         headerBits = 0;
         WriteHeaderBits(subsampleChroma ? 0 : 1, 3);
         WriteHeaderBits(1, 1);
@@ -78,13 +86,11 @@ public class AvifContainerTemplate
         WriteHeaderBits(0, 1);
         WriteHeaderBits(0, 1);
         WriteHeaderBits(1, 1);
-        var result = new byte[(headerBits + 7) / 8];
-        Array.Copy(header, result, result.Length);
-        return result;
+        return header.ToArray();
     }
     private byte[] FrameHeader()
     {
-        header = new byte[64];
+        header = new List<byte>();
         headerBits = 0;
         WriteHeaderBits(0, 1);
         WriteHeaderBits(0, 1);
@@ -92,7 +98,7 @@ public class AvifContainerTemplate
         WriteHeaderBits(1, 1);
         if (width > 64) WriteHeaderBits(0, 1);
         if (height > 64) WriteHeaderBits(0, 1);
-        WriteHeaderBits(quantizerIndex, 8);
+        WriteHeaderBits(TemplateQuantizerIndex, 8);
         WriteHeaderBits(0, 1);
         for (int component = 0; component < 2; component++)
         {
@@ -111,13 +117,11 @@ public class AvifContainerTemplate
         WriteHeaderBits(0, 6);
         WriteHeaderBits(0, 1);
         WriteHeaderBits(1, 1);
-        var result = new byte[(headerBits + 7) / 8];
-        Array.Copy(header, result, result.Length);
-        return result;
+        return header.ToArray();
     }
     private void WriteByte(int value)
     {
-        file[fileCursor++] = (byte)(value & 255);
+        file.Add((byte)(value & 255));
     }
     private void WriteBigEndian(int value, int bytes)
     {
@@ -136,7 +140,7 @@ public class AvifContainerTemplate
     }
     private int BeginBox(string type)
     {
-        int at = fileCursor;
+        int at = file.Count;
         WriteBigEndian(0, 4);
         WriteAscii(type);
         return at;
@@ -149,7 +153,7 @@ public class AvifContainerTemplate
     }
     private void EndBox(int at)
     {
-        PatchSize(at, fileCursor - at);
+        PatchSize(at, file.Count - at);
     }
     private void WriteLeb128(int value)
     {
@@ -162,14 +166,12 @@ public class AvifContainerTemplate
     }
     private void Append(byte[] bytes)
     {
-        Array.Copy(bytes, 0, file, fileCursor, bytes.Length);
-        fileCursor += bytes.Length;
+        file.AddRange(bytes);
     }
     private byte[] Build(int outputSize)
     {
         byte[] sequence = SequenceHeader(), frame = FrameHeader();
-        file = new byte[600];
-        fileCursor = 0;
+        file = new List<byte>();
         int ftyp = BeginBox("ftyp");
         WriteAscii("avif");
         WriteBigEndian(0, 4);
@@ -191,9 +193,9 @@ public class AvifContainerTemplate
         WriteBigEndian(1, 2);
         WriteBigEndian(0, 2);
         WriteBigEndian(1, 2);
-        int offsetMarker = fileCursor;
+        int offsetMarker = file.Count;
         WriteBigEndian(0, 4);
-        int sizeMarker = fileCursor;
+        int sizeMarker = file.Count;
         WriteBigEndian(0, 4);
         EndBox(location);
         int info = BeginFullBox("iinf", 0);
@@ -240,7 +242,7 @@ public class AvifContainerTemplate
         EndBox(mapping);
         EndBox(properties);
         EndBox(meta);
-        int data = BeginBox("mdat"), contentStart = fileCursor;
+        int data = BeginBox("mdat"), contentStart = file.Count;
         WriteByte(0x12);
         WriteByte(0);
         WriteByte(0x0a);
@@ -250,12 +252,10 @@ public class AvifContainerTemplate
         WriteLeb128(frame.Length + outputSize);
         Append(frame);
         PatchSize(offsetMarker, contentStart);
-        PatchSize(sizeMarker, fileCursor - contentStart + outputSize);
-        PatchSize(data, fileCursor - data + outputSize);
+        PatchSize(sizeMarker, file.Count - contentStart + outputSize);
+        PatchSize(data, file.Count - data + outputSize);
         patch = new Vector4(sizeMarker, data, contentStart, frame.Length);
-        byte[] result = new byte[fileCursor];
-        Array.Copy(file, result, fileCursor);
-        return result;
+        return file.ToArray();
     }
 }
 }

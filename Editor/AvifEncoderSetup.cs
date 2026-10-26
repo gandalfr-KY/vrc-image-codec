@@ -184,7 +184,8 @@ public static class AvifEncoderSetup
     }
     static Texture2D InitialCdf(string directory)
     {
-        var pixels = new Color[16384];
+        // Four RGBA cells per CDF context; matches the decoder state atlas and shader context IDs.
+        var pixels = new Color[4096 * 4];
         pixels[0] = new Color(19132, 32767, 32767, 0);
         CdfFamily(pixels, AvifProbabilityDefaults.CreatePartition16Default(), 3, 9);
         CdfFamily(pixels, AvifProbabilityDefaults.CreatePartition32Default(), 39, 9);

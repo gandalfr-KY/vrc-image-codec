@@ -45,7 +45,7 @@ public class AvifDecoder : UdonSharpBehaviour
         if (busy || readbackPending) return;
         CancelDecoding();
         data = inputAvif;
-        if (data == null || data.Length < 300 || !material || !entropyMaterial || !initialCdf)
+        if (data == null || !material || !entropyMaterial || !initialCdf)
         {
             Fail(
                 "AVIF decoding requires configured GPU materials/tables and a complete still-image payload.");
@@ -74,9 +74,12 @@ public class AvifDecoder : UdonSharpBehaviour
         Array.Copy(data, uploadBuffer, data.Length);
         upload.LoadRawTextureData(uploadBuffer);
         upload.Apply(false, false);
-        int stateRows = (16386 + blockColumns * blockRows * 2 + 1023) / 1024;
+        // Fixed shader layout: 4096 CDF contexts * 4 pixels, two range/cursor pixels,
+        // then two neighbour-context pixels per block. This is state size, not an input-byte cap.
+        int stateRows = (4096 * 4 + 2 + blockColumns * blockRows * 2 + 1023) / 1024;
         stateA = CodecBuffers.Surface(stateA, 1024, stateRows, RenderTextureFormat.ARGBFloat);
         stateB = CodecBuffers.Surface(stateB, 1024, stateRows, RenderTextureFormat.ARGBFloat);
+        // Each packet has three plane headers plus 64 Y and 16/64 U,V coefficient words.
         packets = CodecBuffers.Surface(
             packets, 1024, (blockColumns * blockRows * (subsampleChroma ? 99 : 195) + 1023) / 1024,
             RenderTextureFormat.ARGB32);
@@ -112,7 +115,6 @@ public class AvifDecoder : UdonSharpBehaviour
         float before = Time.realtimeSinceStartup;
         if (stage == 0)
         {
-            if (readbackPending) return;
             float until = before + Mathf.Max(.25f, frameBudgetMs) * .001f;
             do
             {
@@ -246,13 +248,8 @@ public class AvifDecoder : UdonSharpBehaviour
             return false;
         }
         int payload = -1;
-        for (int pos = 0, boxes = 0; pos < data.Length && busy; boxes++)
+        for (int pos = 0; pos < data.Length && busy;)
         {
-            if (boxes > 16)
-            {
-                Fail("Too many AVIF boxes.");
-                break;
-            }
             int size = UInt32(pos);
             if (!busy || size < 8 || size > data.Length - pos)
             {

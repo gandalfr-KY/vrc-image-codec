@@ -1,4 +1,3 @@
-static const int Aom_baseRdMultiplier=36860;
 Texture2D<float4> _AomCosts;
 int AomCost(int i){return (int)_AomCosts.Load(int3(i,0,0)).r;}
 int AomEobCost(int i){return (int)_AomCosts.Load(int3(i,1,0)).r;}
@@ -7,11 +6,9 @@ static const int Aom_nzOffsets[64]={0,1,6,6,21,21,21,21,1,6,6,21,21,21,21,21,6,6
 // Profile tuning for prediction screening and chroma RDO: rate weight is quantizer-step squared * 0.07.
 // Table-based rate costs additionally use 1/512-bit units. This is not a quality percentage or AV1 requirement.
 // The luma coefficient trellis below uses a separate libaom-derived multiplier.
-static const float _RdScale=.07;
+static const float PredictionRateWeight = 0.07;
 int _QuantUvDc,_QuantUvAc;
 int StepBase(int plane,int local){return plane==0?(local==0?_QuantDc:_QuantAc):(local==0?_QuantUvDc:_QuantUvAc);}
-
-int StepAt(int plane,int local){return StepBase(plane,local);}
 
 int QuantAt(int value,int plane,int local){int q=StepBase(plane,local);if(abs(value)*32<q*16)return 0;int a=(int)floor((min(abs(value)+q/2,32767)*32.*floor(65536./q))/2097152.);return value<0?-a:a;}
 
@@ -43,7 +40,6 @@ int RdoEobCost(int eob){
  if(bits>0)cost+=AomCost(374+(token-3)*2+(((eob-start)>>(bits-1))&1))+512*(bits-1);
  return cost;
 }
-int LumaStep(int local,int tx){return tx==4?StepBase(0,local):StepAt(0,local);}
 int LumaQuant(int value,int local,int tx){if(tx!=4)return QuantAt(value,0,local);int q=StepBase(0,local);if(abs(value)<(q+1)/2)return 0;int a=(int)floor((min(abs(value)+q/2,32767)*floor(65536./q))/65536.);return value<0?-a:a;}
 int PredictionRate(int code,int2 xy);
 // Copyright (c) 2021, Alliance for Open Media. All rights reserved.
@@ -66,7 +62,7 @@ float OptimizeRdo(int transformed[64],int mode,int txType,int2 xy,out int optimi
  float lambda=floor((rdBase*8*17+16)/32)/65536.;
  if(end>0){
   int accRate=RdoEobCost(end)-AomCost(0),si=end-1,ci=Aom_scan[si],value=q[ci];
-  float accDist=0,step=LumaStep((ci&7)*8+(ci>>3),txType);
+  float accDist=0,step=StepBase(0,(ci&7)*8+(ci>>3));
   int rate=RdoCoeffCost(ci,si,end,value,levels);
   float d=t[ci]-value*step,dist=d*d-(float)t[ci]*t[ci];
   // Last coefficient never becomes zero in this initial general step.
@@ -81,7 +77,7 @@ float OptimizeRdo(int transformed[64],int mode,int txType,int2 xy,out int optimi
   [loop]while(si>=0&&nzCount<=2){
    ci=Aom_scan[si];value=q[ci];
    if(value==0){accRate+=RdoCoeffCost(ci,si,end,0,levels);si--;continue;}
-   step=LumaStep((ci&7)*8+(ci>>3),txType);d=t[ci]-value*step;
+   step=StepBase(0,(ci&7)*8+(ci>>3));d=t[ci]-value*step;
    dist=d*d-(float)t[ci]*t[ci];rate=RdoCoeffCost(ci,si,end,value,levels);
    int low=value+(value<0?1:-1),lowRate=RdoCoeffCost(ci,si,end,low,levels);
    float dl=t[ci]-low*step,lowDist=dl*dl-(float)t[ci]*t[ci];
@@ -105,7 +101,7 @@ float OptimizeRdo(int transformed[64],int mode,int txType,int2 xy,out int optimi
   }
   [loop]for(;si>=0;si--){
    ci=Aom_scan[si];value=q[ci];if(value==0)continue;
-   step=LumaStep((ci&7)*8+(ci>>3),txType);
+   step=StepBase(0,(ci&7)*8+(ci>>3));
    // Native simple path avoids reducing coefficients already below source.
    if(si>0&&abs(value*step)<abs(t[ci]))continue;
    int low=value+(value<0?1:-1);d=t[ci]-value*step;float dl=t[ci]-low*step;
@@ -116,7 +112,7 @@ float OptimizeRdo(int transformed[64],int mode,int txType,int2 xy,out int optimi
  }
  float distortion=0;int rate=RdoEobCost(end);
  [loop]for(int k=0;k<64;k++){
-  float d=t[k]-q[k]*LumaStep((k&7)*8+(k>>3),txType);distortion+=d*d;
+  float d=t[k]-q[k]*StepBase(0,(k&7)*8+(k>>3));distortion+=d*d;
   optimized[(k&7)*8+(k>>3)]=q[k];
  }
  [loop]for(int k=0;k<end;k++){int ci=Aom_scan[k];rate+=RdoCoeffCost(ci,k,end,q[ci],levels);}

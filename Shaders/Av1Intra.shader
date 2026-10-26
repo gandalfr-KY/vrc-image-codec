@@ -195,10 +195,10 @@ void uvTransform(int block,int2 xy,int plane,int mode,int alpha,int average,out 
 float cflTrialCost(int block,int2 xy,int plane,int alpha,int average){
  int t[16],q[16],end=0;float distortion=0;
  uvTransform(block,xy,plane,13,alpha,average,t);
- [unroll]for(int k=0;k<16;k++){q[k]=QuantAt(t[k],plane,k);float d=t[k]-q[k]*StepAt(plane,k);distortion+=d*d;}
+ [unroll]for(int k=0;k<16;k++){q[k]=QuantAt(t[k],plane,k);float d=t[k]-q[k]*StepBase(plane,k);distortion+=d*d;}
  [unroll]for(int k=0;k<16;k++)if(q[UvScan[k]]!=0)end=k+1;
  float alphaBits=alpha==0?1:3+firstbithigh(abs(alpha));
- return distortion+(float)_QuantUvAc*_QuantUvAc*_RdScale*(UvRate(q,end)/512.+alphaBits);
+ return distortion+(float)_QuantUvAc*_QuantUvAc*PredictionRateWeight*(UvRate(q,end)/512.+alphaBits);
 }
 float4 chromaCandidate(v2f_img i):SV_Target{
  int2 p=min((int2)(i.uv*float2(_PhotoSize.z*8,_PhotoSize.w)),int2(_PhotoSize.z*8-1,_PhotoSize.w-1));
@@ -390,8 +390,8 @@ float4 cdefFilter(v2f_img input):SV_Target{
    if(xy.x+2*xy.y!=_Diagonal)return 0;int code=angleCodes[p.x%51];if(!availableCode(code,xy))return float4(1e30,0,0,0);
    int t[64],block=xy.y*(int)_PhotoSize.z+xy.x;transformCandidate(block,xy,code,0,t);
    float distortion=0,rate=PredictionRate(code,xy)/512.;int end=0;
-   [loop]for(int k=0;k<64;k++){int ci=Aom_scan[k],rowMajor=(ci&7)*8+(ci>>3),q=QuantAt(t[rowMajor],0,rowMajor);float error=t[rowMajor]-q*StepAt(0,rowMajor);distortion+=error*error;if(q!=0){end=k+1;rate+=3+2*firstbithigh(abs(q)+1);}else rate+=.25;}
-   return float4(distortion+_QuantAc*_QuantAc*_RdScale*(rate+end*.2),0,0,0);
+   [loop]for(int k=0;k<64;k++){int ci=Aom_scan[k],rowMajor=(ci&7)*8+(ci>>3),q=QuantAt(t[rowMajor],0,rowMajor);float error=t[rowMajor]-q*StepBase(0,rowMajor);distortion+=error*error;if(q!=0){end=k+1;rate+=3+2*firstbithigh(abs(q)+1);}else rate+=.25;}
+   return float4(distortion+_QuantAc*_QuantAc*PredictionRateWeight*(rate+end*.2),0,0,0);
   }
   float4 shortlistModes(v2f_img input):SV_Target{
    int2 p=min((int2)(input.uv*float2(_PhotoSize.z*2,_PhotoSize.w)),int2(_PhotoSize.z*2-1,_PhotoSize.w-1)),xy=int2(p.x/2,p.y);if(xy.x+2*xy.y!=_Diagonal)return 0;
@@ -454,7 +454,7 @@ float4 cdefFilter(v2f_img input):SV_Target{
    int tx=plane==0?(int)round(_ModeTex.Load(int3(xy,0)).b*255):uvType((int)round(_UvModeTex.Load(int3(xy,0)).b*255));
    int block=xy.y*(int)_PhotoSize.z+xy.x,offset=block*SampleCount()+(PlaneOffset(plane)),v[8];
    [loop]for(int c=0;c<n;c++){
-    int k=row*n+c;v[c]=clamp(unpackInt(atIndex(_QuantTex,offset+k))*(plane==0?LumaStep(k,tx):StepAt(plane,k)),-32768,32767);
+    int k=row*n+c;v[c]=clamp(unpackInt(atIndex(_QuantTex,offset+k))*StepBase(plane,k),-32768,32767);
    }
    if(n==8){if(tx==4){[unroll]for(int z=0;z<8;z++)v[z]*=2;}else if(tx==2||tx==3)inv_adst8(v,12,16);else inv_dct8(v,12,16);}
    else {if(tx==2||tx==3)inv_adst4(v,12,16);else inv_dct4(v,12,16);}
