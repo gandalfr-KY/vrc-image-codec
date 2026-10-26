@@ -132,6 +132,42 @@ for row in result["rows"]:
             raise SystemExit(
                 f"{name} {suffix}: {sum(a!=b for a,b in zip(actual,expected))} YUV samples differ"
             )
+    # Compare display-oriented RGB separately from the exact top-first YUV atlas.
+    # Unity texture readback rows are bottom-first; AVIF YUV planes are top-first.
+    # The profile uses full-range BT.601 and explicit nearest-neighbour chroma.
+    rgba = (log / (name + ".rgb.rgba")).read_bytes()
+    chroma_width = width if full else width // 2
+    chroma_height = height if full else height // 2
+    y_size = width * height
+    uv_size = chroma_width * chroma_height
+    maximum = squared = 0
+    for y in range(height):
+        for x in range(width):
+            index = y * width + x
+            uv = y * width + x if full else (y // 2) * chroma_width + x // 2
+            yy, u, v = (
+                expected[index],
+                expected[y_size + uv] - 128,
+                expected[y_size + uv_size + uv] - 128,
+            )
+            reference = (
+                yy + 1.402 * v,
+                yy - 0.344136 * u - 0.714136 * v,
+                yy + 1.772 * u,
+            )
+            for channel in range(3):
+                difference = rgba[((height - 1 - y) * width + x) * 4 + channel] - max(
+                    0, min(255, round(reference[channel]))
+                )
+                maximum = max(maximum, abs(difference))
+                squared += difference * difference
+    rms = (squared / (width * height * 3)) ** 0.5
+    if maximum > 3 or rms > 1.5:
+        raise SystemExit(
+            f"{name}: display RGB/orientation mismatch, max={maximum}, RMS={rms:.3f}"
+        )
+    row["maxRgbDelta"] = maximum
+    row["rmsRgbDelta"] = rms
     row["exactYuvSamples"] = len(expected)
     print(
         f'{name}: {row["bytes"]} bytes, encode {row["encodeSeconds"]:.3f}s, decode {row["decodeSeconds"]:.3f}s; {len(expected)} YUV samples exact in both paths'

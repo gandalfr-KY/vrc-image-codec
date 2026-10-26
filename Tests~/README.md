@@ -21,6 +21,8 @@ and reuses a component with an outstanding readback. Verification image readback
 
 `python Tools~/check-sampling.py <isolated-unity-project> --prepare`, then `--run` and verification,
 checks actual encode/decode round trips at small and Full-HD dimensions for both sampling modes.
+It also compares display-oriented RGB against full-range BT.601 with explicit nearest chroma,
+so a vertically flipped display can no longer pass the YUV-only checks.
 
 Tests~/Reference contains a native C# entropy oracle for coefficient-level regression, excluded from
 Unity packages. Production decoding uses Shaders/Av1Decode.shader and has no CPU coefficient decoder.

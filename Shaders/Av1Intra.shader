@@ -6,6 +6,7 @@ Shader "VrcImageCodec/AV1 Intra"
   Cull Off ZWrite Off ZTest Always
   CGINCLUDE
   #include "UnityCG.cginc"
+  #include "CodecCommon.hlsl"
   #include "Av1Transforms.hlsl"
   Texture2D<float4> _MainTex,_ReconTex,_QuantTex,_SourceTex,_ModeTex,_CflTex,_OptimizedTex,_CandidateTex,_UvCandidates,_UvModeTex,_ModeCosts,_Shortlist,_SourceYuvTex;
   float4 _AtlasSize,_PhotoSize,_PackedSize;
@@ -493,7 +494,10 @@ float4 cdefFilter(v2f_img input):SV_Target{
    return packInt(coefficient,pred,0);
   }
   float4 decodedRgb(v2f_img i):SV_Target{
-   int2 pixel=min((int2)(i.uv*_PhotoSize.xy),(int2)_PhotoSize.xy-1);
+   // AVIF rows are top-first; Unity display textures are bottom-first.
+   // Blit UV orientation differs between Editor and VRChat, so convert raster Y explicitly.
+   int2 pixel=min((int2)i.pos.xy,(int2)_PhotoSize.xy-1);
+   pixel.y=(int)_PhotoSize.y-1-pixel.y;
    int block=(pixel.y/8)*(int)_PhotoSize.z+pixel.x/8;
    float y=rawAt(block,(pixel.y%8)*8+pixel.x%8)/255.;
    int cp=_Chroma444!=0?(pixel.y%8)*8+pixel.x%8:((pixel.y%8)/2)*4+(pixel.x%8)/2;
@@ -501,7 +505,7 @@ float4 cdefFilter(v2f_img input):SV_Target{
    float v=(rawAt(block,PlaneOffset(2)+cp)-128)/255.;
    float3 rgb=saturate(float3(y+1.402*v,y-.344136*u-.714136*v,y+1.772*u));
    #ifndef UNITY_COLORSPACE_GAMMA
-    rgb=GammaToLinearSpace(rgb);
+    rgb=float3(CodecSrgbToLinear(rgb.r),CodecSrgbToLinear(rgb.g),CodecSrgbToLinear(rgb.b));
    #endif
    return float4(rgb,1);
   }

@@ -94,6 +94,7 @@ public class AvifSamplingObserver : MonoBehaviour
                             File.WriteAllText(Root + "/error.txt", "RGB readback failed");
                             return;
                         }
+                        File.WriteAllBytes(Root + "/" + row.id + ".rgb.rgba", request.GetData<byte>().ToArray());
                         var image =
                             new Texture2D(output.width, output.height, TextureFormat.RGBA32, false, true);
                         image.LoadRawTextureData(request.GetData<byte>());
