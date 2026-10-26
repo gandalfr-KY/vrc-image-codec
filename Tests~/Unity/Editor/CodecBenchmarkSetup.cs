@@ -32,8 +32,6 @@ public static class CodecBenchmarkSetup
         System.IO.Directory.CreateDirectory(DirectoryPath);
         foreach (string name in new[] { "measurements.jsonl", "done.txt", "error.txt", "group.done" })
             File.Delete(Path.Combine(DirectoryPath, name));
-        foreach (string path in System.IO.Directory.GetFiles(DirectoryPath, "*-source.rgba"))
-            File.Delete(path);
         SessionState.SetString(State + "scene", SceneManager.GetActiveScene().path);
         SessionState.SetString(State + "settings", JsonUtility.ToJson(ClientSimSettings.Instance));
         SessionState.SetInt(State + "group", 0);

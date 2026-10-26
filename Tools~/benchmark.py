@@ -101,17 +101,13 @@ def verify(project, ffmpeg):
         )
         plane_size, chroma_size = width * height, chroma_width * chroma_height
         pixels = (directory / (row["id"] + ".rgba")).read_bytes()
-        source_pixels = (
-            directory / f'{row["image"]}-{width}x{height}-source.rgba'
-        ).read_bytes()
         if (
             encoded.stat().st_size != row["bytes"]
             or len(reference) != plane_size + 2 * chroma_size
             or len(pixels) != plane_size * 4
-            or len(source_pixels) != plane_size * 4
         ):
             raise SystemExit("Unexpected image length: " + row["id"])
-        maximum = squared = source_squared = 0
+        maximum = squared = 0
         for y in range(height):
             for x in range(width):
                 chroma = (
@@ -128,18 +124,11 @@ def verify(project, ffmpeg):
                     luminance + 1.772 * u,
                 )
                 for channel in range(3):
-                    pixel = ((height - 1 - y) * width + x) * 4 + channel
-                    difference = pixels[pixel] - max(
-                        0, min(255, math.floor(rgb[channel] + 0.5))
-                    )
-                    source_squared += (pixels[pixel] - source_pixels[pixel]) ** 2
+                    difference = pixels[
+                        ((height - 1 - y) * width + x) * 4 + channel
+                    ] - max(0, min(255, math.floor(rgb[channel] + 0.5)))
                     maximum = max(maximum, abs(difference))
                     squared += difference * difference
-        row["rgbPsnr"] = (
-            10 * math.log10(255**2 * plane_size * 3 / source_squared)
-            if source_squared
-            else None
-        )
         row["maxRgbDelta"] = maximum
         row["rmsRgbDelta"] = math.sqrt(squared / (plane_size * 3))
         row["verified"] = maximum <= 3 and row["rmsRgbDelta"] <= 1.5
@@ -174,8 +163,8 @@ def verify(project, ffmpeg):
         "",
         "Binary sizes exclude URL/encryption. Timings exclude validation. Each row is the range across the three photographs.",
         "",
-        "| Codec | Sampling | Resolution | Q | Bytes | Encode (s) | Decode (s) | RGB PSNR (dB) |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Codec | Sampling | Resolution | Q | Bytes | Encode (s) | Decode (s) |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     groups = {}
     for row in rows:
@@ -190,16 +179,15 @@ def verify(project, ffmpeg):
     for (codec, sampling, width, height, quality), group in groups.items():
         if any(row.get("error") for row in group):
             summary.append(
-                f"| {codec} | {sampling} | {width}x{height} | {quality} | Limit/error: see JSON | | | |"
+                f"| {codec} | {sampling} | {width}x{height} | {quality} | Limit/error: see JSON | | |"
             )
             continue
         ranges = [
-            f"{min(float("inf") if row[key] is None else row[key] for row in group):.{precision}f}–{max(float("inf") if row[key] is None else row[key] for row in group):.{precision}f}"
+            f"{min(row[key] for row in group):.{precision}f}–{max(row[key] for row in group):.{precision}f}"
             for key, precision in (
                 ("bytes", 0),
                 ("encodeSeconds", 3),
                 ("decodeSeconds", 3),
-                ("rgbPsnr", 2),
             )
         ]
         summary.append(
