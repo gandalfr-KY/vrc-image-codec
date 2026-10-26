@@ -229,9 +229,9 @@ float4 WriteAvif(v2f_img pixel) : SV_Target
 {
     uint2 id = (uint2)pixel.pos.xy;
     int word = (int)id.y * 8192 + (int)id.x, length = (int)_Counts.Load(int3(0, 0, 0)).r;
-    int payload = length + (int)_HeaderPatch.w, page = payload >= 16384 ? 2 : payload >= 128 ? 1 : 0;
+    int payload = length + (int)_HeaderPatch.w, page = payload >= 2097152 ? 3 : payload >= 16384 ? 2 : payload >= 128 ? 1 : 0;
     int headerLength = (int)_HeaderSizes[page], total = headerLength + length;
-    if (word == 0) return float4(total & 255, (total >> 8) & 255, (total >> 16) & 255, 255) / 255.;
+    if (word == 0) return float4(total & 255, (total >> 8) & 255, (total >> 16) & 255, (total >> 24) & 255) / 255.;
     int at = (word - 1) * 4;
     if (at >= total) return 0;
     return float4(AssembleByte(at, length, page, headerLength),

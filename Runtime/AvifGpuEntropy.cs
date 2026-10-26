@@ -30,6 +30,9 @@ public class AvifGpuEntropy : UdonSharpBehaviour
     private RenderTexture rangeCheckpoints, rangeCount, rangeDigits, rangeOutput;
     private bool waitingForCount;
 
+    private byte[] countReadback = new byte[4];
+    private byte[] imageReadback;
+
     public void BeginEncoding(RenderTexture packet, int quantizerIndex)
     {
         busy = true;
@@ -104,17 +107,26 @@ public class AvifGpuEntropy : UdonSharpBehaviour
         rangeCheckpoints = CodecBuffers.Surface(rangeCheckpoints, 2 * ((count + 2047) / 2048 + 1), 1,
                                                 RenderTextureFormat.ARGBFloat);
         rangeCount = CodecBuffers.Surface(rangeCount, 1, 1, RenderTextureFormat.ARGBFloat);
-        rangeDigits = CodecBuffers.Surface(rangeDigits, 8192, 4, RenderTextureFormat.ARGBFloat);
-        rangeOutput = CodecBuffers.Surface(rangeOutput, 8192, 4, RenderTextureFormat.ARGB32);
         rangeMaterial.SetInt("_TokenCount", count);
         rangeMaterial.SetTexture("_Tokens", resolvedTokens);
         rangeMaterial.SetTexture("_Checkpoints", rangeCheckpoints);
         rangeMaterial.SetTexture("_Counts", rangeCount);
-        rangeMaterial.SetTexture("_Digits", rangeDigits);
         VRCGraphics.Blit(Texture2D.blackTexture, rangeCheckpoints, rangeMaterial, 0);
         VRCGraphics.Blit(Texture2D.blackTexture, rangeCount, rangeMaterial, 1);
+        SubmitOutput(rangeOutput ? rangeOutput.width * rangeOutput.height * 4 : 131072);
+    }
+
+    private void SubmitOutput(int capacity)
+    {
+        int rows = (capacity + 32767) / 32768;
+        rangeDigits = CodecBuffers.Surface(rangeDigits, 8192, rows, RenderTextureFormat.ARGBFloat);
+        rangeOutput = CodecBuffers.Surface(rangeOutput, 8192, rows, RenderTextureFormat.ARGB32);
+        rangeMaterial.SetTexture("_Digits", rangeDigits);
         VRCGraphics.Blit(Texture2D.blackTexture, rangeDigits, rangeMaterial, 2);
         VRCGraphics.Blit(Texture2D.blackTexture, rangeOutput, rangeMaterial, 3);
+        int readbackBytes = rangeOutput.width * rangeOutput.height * 4;
+        if (imageReadback == null || imageReadback.Length != readbackBytes)
+            imageReadback = new byte[readbackBytes];
         waitingForCount = false;
         readbackPending = true;
         VRCAsyncGPUReadback.Request(rangeOutput, 0, TextureFormat.RGBA32, this);
@@ -132,17 +144,16 @@ public class AvifGpuEntropy : UdonSharpBehaviour
     {
         readbackPending = false;
         if (!busy) return;
-        byte[] bytes = new byte[waitingForCount ? 4 : 8192 * 4 * 4];
+        byte[] bytes = waitingForCount ? countReadback : imageReadback;
         if (request.hasError || !request.TryGetData(bytes))
         {
             busy = false;
             error = "AVIF GPU readback failed.";
             return;
         }
-        int length = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16);
+        int length = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
         if (waitingForCount)
         {
-            length |= bytes[3] << 24;
             // SM5 texture width (16384) bounds two RGBA checkpoint records per 2048 tokens.
             if (length < 1 || length > (16384 / 2 - 1) * 2048)
             {
@@ -153,12 +164,13 @@ public class AvifGpuEntropy : UdonSharpBehaviour
             EncodeRecords(length);
             return;
         }
-        busy = false;
-        if (length < 1 || length > 100000)
+        if (length > bytes.Length - 4)
         {
-            error = "AVIF exceeds the 100000-byte limit.";
+            // Grow from the GPU's actual length; coefficients, CDFs and range checkpoints are reused.
+            SubmitOutput(length + 4);
             return;
         }
+        busy = false;
         result = new byte[length];
         Array.Copy(bytes, 4, result, 0, length);
         complete = true;

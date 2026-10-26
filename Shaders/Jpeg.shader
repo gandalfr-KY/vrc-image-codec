@@ -169,7 +169,7 @@ int Quant(int index, int component)
             int length = HeaderSize + total + 2;
             if (pixel == 0) return CodecBytes(length);
             int at = (pixel-1)*4;
-            if (at >= length || length > 8388608) return 0;
+            if (at >= length) return 0;
             uint4 result = 0;
             int cachedMcu = -1, cachedLocal = 0;
             uint4 cachedBytes = 0;

@@ -6,8 +6,6 @@ Keep runtime dependencies directed from the consumer to this package.
 
 Validate unknown settings at their public boundary. Keep the coding hot path allocation and operation order stable; loops and explicit buffers are intentional in Udon/GPU code. Avoid single-use wrappers, defensive revalidation of internal data, import aliases, and speculative options. Keep supporting helpers beside their caller. Comments should explain constraints rather than restate code.
 
-Run Tools~/check-codec.py after runtime edits and Tools~/check-shaders.py after shader edits. Compare exact AVIF bytes, not only successful decoding. Test package import and actual compiled-Udon processing in Unity; do not launch VRChat automatically. Never modify upstream attribution or replace this package with a native codec dependency.
+Run the portable ClientSim benchmark in Tests~/README.md after runtime or shader edits. Use the actual compiled Udon implementation and GPU; never substitute a native CPU codec for the measured path. Verify every produced image once against FFmpeg and retain timing, binary length and pixel-error results. Validation stays outside measured intervals. These single-run timings include first-use effects; they are not statistical performance claims.
 
-Run Tools~/check-jpeg.py against the isolated Unity project after JPEG edits. Verify orientation, dimensions and decoded pixels against FFmpeg, including odd dimensions and quality extremes. JPEG readbacks carry metadata/results only; do not introduce CPU image computation or a native codec runtime dependency.
-
-Run Tools~/check-avif-decoder.py and Tools~/check-sampling.py for actual GPU decoder/round-trip changes. The native CPU oracle under Tests~/Reference is test-only. GPU completion and command submission are different timings; measure through the final completion readback.
+Keep untrusted-input bounds and format validation. Do not repeat intermediate layout checks already owned by Editor configuration. Reuse working buffers, but retain copies needed to upload padded textures or return a precisely sized byte array. Preserve upstream attribution and PATENTS. Do not launch VRChat automatically.

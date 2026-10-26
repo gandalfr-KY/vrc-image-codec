@@ -24,8 +24,8 @@ public class AvifEncoder : UdonSharpBehaviour
     public float progress, elapsedSeconds, cpuSeconds, maxStepMs, lastWorkTime;
     private float startedAt;
     private int stage, quantizerIndex;
-    private int[] dcQuant = AvifTables.CreateDcQuant();
-    private int[] acQuant = AvifTables.CreateAcQuant();
+    private int[] dcQuant = AvifQuantization.CreateDcQuant();
+    private int[] acQuant = AvifQuantization.CreateAcQuant();
 
     public void BeginEncoding()
     {

@@ -29,32 +29,37 @@ public class AvifDecoder : UdonSharpBehaviour
     public int width, height, decodedBlocks;
     [HideInInspector]
     public float progress, elapsedSeconds, cpuSeconds, maxStepMs;
-    private byte[] data;
+    private byte[] data, uploadBuffer;
+    private byte[] statusReadback = new byte[4];
     private bool disableCdfUpdate;
-    private int cols, rows, cursor, limit, stage, at, end, bitAt, headerEnd, quantizerIndex, qctx, diagonal;
+    private int blockColumns, blockRows, decodedBlockCursor, blockLimit, stage, byteOffset, obuEnd, bitOffset,
+        headerEnd, quantizerIndex, quantizerContext, diagonal;
     private float startedAt;
     private Texture2D upload;
     private RenderTexture stateA, stateB, packets, status, quant, recon, filtered, mode, uvMode, scratch,
         chromaScratch, output;
-    private int[] dcQuant = AvifTables.CreateDcQuant(), acQuant = AvifTables.CreateAcQuant();
+    private int[] dcQuant = AvifQuantization.CreateDcQuant(), acQuant = AvifQuantization.CreateAcQuant();
 
     public void BeginDecoding()
     {
         if (busy || readbackPending) return;
         CancelDecoding();
         data = inputAvif;
-        if (data == null || data.Length < 300 || data.Length > 100000 || !material || !entropyMaterial ||
-            !initialCdf)
+        if (data == null || data.Length < 300 || !material || !entropyMaterial || !initialCdf)
         {
-            Fail("AVIF decoding requires configured GPU materials/tables and a 300..100000 byte image.");
+            Fail(
+                "AVIF decoding requires configured GPU materials/tables and a complete still-image payload.");
             return;
         }
         busy = true;
         startedAt = Time.realtimeSinceStartup;
         if (!ReadProfile()) return;
-        cols = width / 8;
-        rows = height / 8;
-        qctx = quantizerIndex <= 20 ? 0 : quantizerIndex <= 60 ? 1 : quantizerIndex <= 120 ? 2 : 3;
+        blockColumns = width / 8;
+        blockRows = height / 8;
+        quantizerContext = quantizerIndex <= 20    ? 0
+                           : quantizerIndex <= 60  ? 1
+                           : quantizerIndex <= 120 ? 2
+                                                   : 3;
         int inputRows = (data.Length + 4095) / 4096;
         if (!upload || upload.height != inputRows)
         {
@@ -63,29 +68,31 @@ public class AvifDecoder : UdonSharpBehaviour
             upload.filterMode = FilterMode.Point;
             upload.wrapMode = TextureWrapMode.Clamp;
         }
-        byte[] bytes = new byte[inputRows * 4096];
-        Array.Copy(data, bytes, data.Length);
-        upload.LoadRawTextureData(bytes);
+        if (uploadBuffer == null || uploadBuffer.Length != inputRows * 4096)
+            uploadBuffer = new byte[inputRows * 4096];
+        // Shader reads are bounded by the AVIF length, so unused padding need not be cleared.
+        Array.Copy(data, uploadBuffer, data.Length);
+        upload.LoadRawTextureData(uploadBuffer);
         upload.Apply(false, false);
-        int stateRows = (16386 + cols * rows * 2 + 1023) / 1024;
+        int stateRows = (16386 + blockColumns * blockRows * 2 + 1023) / 1024;
         stateA = CodecBuffers.Surface(stateA, 1024, stateRows, RenderTextureFormat.ARGBFloat);
         stateB = CodecBuffers.Surface(stateB, 1024, stateRows, RenderTextureFormat.ARGBFloat);
-        packets =
-            CodecBuffers.Surface(packets, 1024, (cols * rows * (subsampleChroma ? 99 : 195) + 1023) / 1024,
-                                 RenderTextureFormat.ARGB32);
+        packets = CodecBuffers.Surface(
+            packets, 1024, (blockColumns * blockRows * (subsampleChroma ? 99 : 195) + 1023) / 1024,
+            RenderTextureFormat.ARGB32);
         status = CodecBuffers.Surface(status, 1, 1, RenderTextureFormat.ARGB32);
         entropyMaterial.SetTexture("_Bytes", upload);
         entropyMaterial.SetTexture("_Initial", initialCdf);
-        entropyMaterial.SetInt("_Start", bitAt / 8);
-        entropyMaterial.SetInt("_End", end);
-        entropyMaterial.SetInt("_Cols", cols);
-        entropyMaterial.SetInt("_Rows", rows);
-        entropyMaterial.SetInt("_Qctx", qctx);
+        entropyMaterial.SetInt("_Start", bitOffset / 8);
+        entropyMaterial.SetInt("_End", obuEnd);
+        entropyMaterial.SetInt("_Cols", blockColumns);
+        entropyMaterial.SetInt("_Rows", blockRows);
+        entropyMaterial.SetInt("_Qctx", quantizerContext);
         entropyMaterial.SetInt("_Subsampled", subsampleChroma ? 1 : 0);
         entropyMaterial.SetInt("_DisableCdf", disableCdfUpdate ? 1 : 0);
         VRCGraphics.Blit(Texture2D.blackTexture, stateA, entropyMaterial, 0);
-        cursor = stage = decodedBlocks = 0;
-        limit = ((cols + 7) / 8) * ((rows + 7) / 8) * 64;
+        decodedBlockCursor = stage = decodedBlocks = 0;
+        blockLimit = ((blockColumns + 7) / 8) * ((blockRows + 7) / 8) * 64;
     }
     public void CancelDecoding()
     {
@@ -109,7 +116,7 @@ public class AvifDecoder : UdonSharpBehaviour
             float until = before + Mathf.Max(.25f, frameBudgetMs) * .001f;
             do
             {
-                entropyMaterial.SetInt("_ChunkStart", cursor);
+                entropyMaterial.SetInt("_ChunkStart", decodedBlockCursor);
                 entropyMaterial.SetTexture("_State", stateA);
                 VRCGraphics.Blit(Texture2D.blackTexture, stateB, entropyMaterial, 3);
                 entropyMaterial.SetInt("_OutputHeight", stateB.height);
@@ -119,10 +126,10 @@ public class AvifDecoder : UdonSharpBehaviour
                 RenderTexture swap = stateA;
                 stateA = stateB;
                 stateB = swap;
-                cursor += 16;
-            } while (cursor < limit && Time.realtimeSinceStartup < until);
-            progress = .75f * cursor / limit;
-            if (cursor >= limit)
+                decodedBlockCursor += 16;
+            } while (decodedBlockCursor < blockLimit && Time.realtimeSinceStartup < until);
+            progress = .75f * decodedBlockCursor / blockLimit;
+            if (decodedBlockCursor >= blockLimit)
             {
                 entropyMaterial.SetTexture("_State", stateA);
                 VRCGraphics.Blit(Texture2D.blackTexture, status, entropyMaterial, 4);
@@ -141,7 +148,7 @@ public class AvifDecoder : UdonSharpBehaviour
     {
         readbackPending = false;
         if (!busy) return;
-        byte[] bytes = new byte[4];
+        byte[] bytes = statusReadback;
         if (request.hasError || !request.TryGetData(bytes))
         {
             Fail("AVIF GPU readback failed.");
@@ -161,7 +168,7 @@ public class AvifDecoder : UdonSharpBehaviour
             Fail("Invalid or unsupported AV1 entropy stream.");
             return;
         }
-        decodedBlocks = cols * rows;
+        decodedBlocks = blockColumns * blockRows;
         BeginReconstruction();
     }
     private void Fail(string message)
@@ -195,12 +202,12 @@ public class AvifDecoder : UdonSharpBehaviour
     }
     private int Byte()
     {
-        if (at >= end)
+        if (byteOffset >= obuEnd)
         {
             Fail("Truncated AVIF payload.");
             return 0;
         }
-        return data[at++];
+        return data[byteOffset++];
     }
     private int Leb()
     {
@@ -216,14 +223,14 @@ public class AvifDecoder : UdonSharpBehaviour
     }
     private int Bits(int count)
     {
-        if (!busy || bitAt + count > headerEnd * 8)
+        if (!busy || bitOffset + count > headerEnd * 8)
         {
             Fail("Truncated AV1 header.");
             return 0;
         }
         int value = 0;
         for (int i = 0; i < count; i++)
-            value = (value << 1) | ((data[bitAt >> 3] >> (7 - (bitAt++ & 7))) & 1);
+            value = (value << 1) | ((data[bitOffset >> 3] >> (7 - (bitOffset++ & 7))) & 1);
         return value;
     }
     private void Expect(int value, int count)
@@ -260,7 +267,7 @@ public class AvifDecoder : UdonSharpBehaviour
                     break;
                 }
                 payload = pos + 8;
-                end = pos + size;
+                obuEnd = pos + size;
             }
             pos += size;
         }
@@ -270,20 +277,20 @@ public class AvifDecoder : UdonSharpBehaviour
             Fail("Missing AVIF image payload.");
             return false;
         }
-        at = payload;
+        byteOffset = payload;
         if (Byte() != 0x12 || Byte() != 0 || Byte() != 0x0a)
         {
             Fail("Unsupported AV1 sequence.");
             return false;
         }
         int sequenceLength = Leb();
-        if (sequenceLength < 1 || sequenceLength > end - at)
+        if (sequenceLength < 1 || sequenceLength > obuEnd - byteOffset)
         {
             Fail("Invalid sequence bounds.");
             return false;
         }
-        bitAt = at * 8;
-        headerEnd = at + sequenceLength;
+        bitOffset = byteOffset * 8;
+        headerEnd = byteOffset + sequenceLength;
         int profile = Bits(3);
         if (profile != 0 && profile != 1)
         {
@@ -316,22 +323,22 @@ public class AvifDecoder : UdonSharpBehaviour
         Expect(0, 1);
         Expect(0, 1);
         Expect(1, 1);
-        while (busy && bitAt < headerEnd * 8)
+        while (busy && bitOffset < headerEnd * 8)
             Expect(0, 1);
-        at = headerEnd;
+        byteOffset = headerEnd;
         if (!busy || Byte() != 0x32)
         {
             if (busy) Fail("Missing AV1 frame.");
             return false;
         }
         int frameLength = Leb();
-        if (frameLength != end - at)
+        if (frameLength != obuEnd - byteOffset)
         {
             Fail("Invalid AV1 frame length.");
             return false;
         }
-        bitAt = at * 8;
-        headerEnd = end;
+        bitOffset = byteOffset * 8;
+        headerEnd = obuEnd;
         // Probability adaptation is signaled per image; reconstruction is unchanged.
         disableCdfUpdate = Bits(1) != 0;
         Expect(0, 1);
@@ -358,28 +365,29 @@ public class AvifDecoder : UdonSharpBehaviour
         Expect(0, 6);
         Expect(0, 1);
         Expect(1, 1);
-        while (busy && (bitAt & 7) != 0)
+        while (busy && (bitOffset & 7) != 0)
             Expect(0, 1);
-        at = bitAt / 8;
-        if (at >= end || quantizerIndex == 0) Fail("Missing AV1 tile or unsupported lossless mode.");
+        byteOffset = bitOffset / 8;
+        if (byteOffset >= obuEnd || quantizerIndex == 0)
+            Fail("Missing AV1 tile or unsupported lossless mode.");
         return busy;
     }
 
     private void BeginReconstruction()
     {
-        int atlasRows = rows * (subsampleChroma ? 12 : 24);
+        int atlasRows = blockRows * (subsampleChroma ? 12 : 24);
         quant = CodecBuffers.Surface(quant, width, atlasRows, RenderTextureFormat.ARGB32);
         recon = CodecBuffers.Surface(recon, width, atlasRows, RenderTextureFormat.ARGB32);
         filtered = CodecBuffers.Surface(filtered, width, atlasRows, RenderTextureFormat.ARGB32);
-        mode = CodecBuffers.Surface(mode, cols, rows, RenderTextureFormat.ARGB32);
-        uvMode = CodecBuffers.Surface(uvMode, cols, rows, RenderTextureFormat.ARGB32);
-        scratch = CodecBuffers.Surface(scratch, cols * 16, rows, RenderTextureFormat.ARGBFloat);
+        mode = CodecBuffers.Surface(mode, blockColumns, blockRows, RenderTextureFormat.ARGB32);
+        uvMode = CodecBuffers.Surface(uvMode, blockColumns, blockRows, RenderTextureFormat.ARGB32);
+        scratch = CodecBuffers.Surface(scratch, blockColumns * 16, blockRows, RenderTextureFormat.ARGBFloat);
         if (!subsampleChroma)
-            chromaScratch =
-                CodecBuffers.Surface(chromaScratch, cols * 32, rows, RenderTextureFormat.ARGBFloat);
+            chromaScratch = CodecBuffers.Surface(chromaScratch, blockColumns * 32, blockRows,
+                                                 RenderTextureFormat.ARGBFloat);
         output = CodecBuffers.Surface(output, width, height, RenderTextureFormat.ARGB32, true);
         material.SetInt("_Chroma444", subsampleChroma ? 0 : 1);
-        material.SetVector("_PhotoSize", new Vector4(width, height, cols, rows));
+        material.SetVector("_PhotoSize", new Vector4(width, height, blockColumns, blockRows));
         material.SetVector("_AtlasSize", new Vector4(width, atlasRows, 0, 0));
         material.SetVector("_PackedSize", new Vector4(packets.width, packets.height, 0, 0));
         material.SetTexture("_DecodedTex", packets);
@@ -407,8 +415,8 @@ public class AvifDecoder : UdonSharpBehaviour
         // Per-instance material properties are set before each submission so duplicated decoders cannot mix
         // inputs.
         material.SetInt("_Chroma444", subsampleChroma ? 0 : 1);
-        material.SetVector("_PhotoSize", new Vector4(width, height, cols, rows));
-        material.SetVector("_AtlasSize", new Vector4(width, rows * (subsampleChroma ? 12 : 24), 0, 0));
+        material.SetVector("_PhotoSize", new Vector4(width, height, blockColumns, blockRows));
+        material.SetVector("_AtlasSize", new Vector4(width, blockRows * (subsampleChroma ? 12 : 24), 0, 0));
         material.SetVector("_PackedSize", new Vector4(packets.width, packets.height, 0, 0));
         material.SetTexture("_DecodedTex", packets);
         material.SetTexture("_QuantTex", quant);
@@ -421,7 +429,7 @@ public class AvifDecoder : UdonSharpBehaviour
         material.SetInt("_QuantAc", acQuant[quantizerIndex]);
         material.SetInt("_QuantUvDc", dcQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
         material.SetInt("_QuantUvAc", acQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
-        int diagonals = cols + 2 * rows - 2;
+        int diagonals = blockColumns + 2 * blockRows - 2;
         for (int i = 0; i < Mathf.Max(1, diagonalsPerFrame) && diagonal < diagonals; i++, diagonal++)
         {
             material.SetInt("_Diagonal", diagonal);

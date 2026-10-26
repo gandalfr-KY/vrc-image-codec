@@ -23,7 +23,7 @@ public class JpegEncoder : UdonSharpBehaviour
     public byte[] resultJpeg;
     [HideInInspector]
     public float progress, elapsedSeconds;
-    private RenderTexture horizontal, coefficients, prefixA, prefixB, output;
+    private RenderTexture rowTransforms, coefficients, segmentOffsets, scanScratch, output;
     private float startedAt;
     private byte[] readbackBuffer;
 
@@ -45,42 +45,44 @@ public class JpegEncoder : UdonSharpBehaviour
         startedAt = Time.realtimeSinceStartup;
         busy = true;
         int mcuSize = subsampleChroma ? 16 : 8;
-        int cols = (width + mcuSize - 1) / mcuSize, rows = (height + mcuSize - 1) / mcuSize,
-            count = cols * rows;
-        horizontal =
-            CodecBuffers.Surface(horizontal, cols * mcuSize, rows * mcuSize, RenderTextureFormat.ARGBFloat);
-        coefficients =
-            CodecBuffers.Surface(coefficients, cols * mcuSize, rows * mcuSize, RenderTextureFormat.ARGBFloat);
-        prefixA = CodecBuffers.Surface(prefixA, 1024, (count + 1023) / 1024, RenderTextureFormat.ARGBFloat);
-        prefixB = CodecBuffers.Surface(prefixB, 1024, prefixA.height, RenderTextureFormat.ARGBFloat);
+        int mcuColumns = (width + mcuSize - 1) / mcuSize, mcuRows = (height + mcuSize - 1) / mcuSize,
+            mcuCount = mcuColumns * mcuRows;
+        rowTransforms = CodecBuffers.Surface(rowTransforms, mcuColumns * mcuSize, mcuRows * mcuSize,
+                                             RenderTextureFormat.ARGBFloat);
+        coefficients = CodecBuffers.Surface(coefficients, mcuColumns * mcuSize, mcuRows * mcuSize,
+                                            RenderTextureFormat.ARGBFloat);
+        segmentOffsets = CodecBuffers.Surface(segmentOffsets, 1024, (mcuCount + 1023) / 1024,
+                                              RenderTextureFormat.ARGBFloat);
+        scanScratch =
+            CodecBuffers.Surface(scanScratch, 1024, segmentOffsets.height, RenderTextureFormat.ARGBFloat);
         material.SetInt("_Subsampled", subsampleChroma ? 1 : 0);
         material.SetInt("_Width", width);
         material.SetInt("_Height", height);
-        material.SetInt("_Cols", cols);
-        material.SetInt("_Rows", rows);
-        material.SetInt("_Count", count);
+        material.SetInt("_Cols", mcuColumns);
+        material.SetInt("_Rows", mcuRows);
+        material.SetInt("_Count", mcuCount);
         material.SetInt("_Quality", quality);
         material.SetInt("_Linear", linearInput ? 1 : 0);
         material.SetTexture("_Input", inputTexture);
-        material.SetTexture("_Work", horizontal);
+        material.SetTexture("_Work", rowTransforms);
         material.SetTexture("_Coefficients", coefficients);
-        VRCGraphics.Blit(Texture2D.blackTexture, horizontal, material, 0);
+        VRCGraphics.Blit(Texture2D.blackTexture, rowTransforms, material, 0);
         VRCGraphics.Blit(Texture2D.blackTexture, coefficients, material, 1);
-        VRCGraphics.Blit(Texture2D.blackTexture, prefixA, material, 2);
-        for (int step = 1; step < count; step *= 2)
+        VRCGraphics.Blit(Texture2D.blackTexture, segmentOffsets, material, 2);
+        for (int step = 1; step < mcuCount; step *= 2)
         {
-            material.SetTexture("_Prefix", prefixA);
+            material.SetTexture("_Prefix", segmentOffsets);
             material.SetInt("_Stride", step);
-            VRCGraphics.Blit(Texture2D.blackTexture, prefixB, material, 3);
-            RenderTexture swap = prefixA;
-            prefixA = prefixB;
-            prefixB = swap;
+            VRCGraphics.Blit(Texture2D.blackTexture, scanScratch, material, 3);
+            RenderTexture swap = segmentOffsets;
+            segmentOffsets = scanScratch;
+            scanScratch = swap;
         }
-        material.SetTexture("_Prefix", prefixA);
+        material.SetTexture("_Prefix", segmentOffsets);
         // Baseline Huffman limits: DC <= 27 bits, each AC <= 26 bits, plus byte stuffing.
         // Reserve once to avoid waiting for a separate GPU length readback.
-        int bound = 631 + count * (((((subsampleChroma ? 6 : 3) * 1665) + 7) / 8) * 2 + 2);
-        int capacity = Mathf.Min(8388608, bound);
+        int maximumEncodedBytes = 631 + mcuCount * (((((subsampleChroma ? 6 : 3) * 1665) + 7) / 8) * 2 + 2);
+        int capacity = Mathf.Min(8388608, maximumEncodedBytes);
         output = CodecBuffers.Surface(output, 1024, (capacity + 4 + 4095) / 4096, RenderTextureFormat.ARGB32);
         VRCGraphics.Blit(Texture2D.blackTexture, output, material, 12);
         readbackPending = true;
@@ -102,10 +104,14 @@ public class JpegEncoder : UdonSharpBehaviour
             return;
         }
         int length = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
-        if (length < 631 || length > 8388608 || length > bytes.Length - 4)
+        if (length > bytes.Length - 4)
         {
-            busy = false;
-            error = "JPEG exceeds the 8 MiB byte-buffer limit.";
+            // The first reservation avoids a length-only readback; larger results grow on demand.
+            output =
+                CodecBuffers.Surface(output, 1024, (length + 4 + 4095) / 4096, RenderTextureFormat.ARGB32);
+            VRCGraphics.Blit(Texture2D.blackTexture, output, material, 12);
+            readbackPending = true;
+            VRCAsyncGPUReadback.Request(output, 0, TextureFormat.RGBA32, this);
             return;
         }
         resultJpeg = new byte[length];
@@ -127,7 +133,7 @@ public class JpegEncoder : UdonSharpBehaviour
 
     private void OnDestroy()
     {
-        RenderTexture[] textures = { horizontal, coefficients, prefixA, prefixB, output };
+        RenderTexture[] textures = { rowTransforms, coefficients, segmentOffsets, scanScratch, output };
         CodecBuffers.Release(textures);
     }
 }

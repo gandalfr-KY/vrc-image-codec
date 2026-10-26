@@ -121,23 +121,26 @@ public static class AvifEncoderSetup
                                        gpu.optimizedTexture, true);
         gpu.candidateTexture = Texture(directory, "Transform candidates", columns * 40, rows, false,
                                        gpu.candidateTexture, true, RenderTextureFormat.RFloat);
-        gpu.uvCandidates = Texture(directory, "UV candidates", columns * 8, rows, false, gpu.uvCandidates,
-                                   true, RenderTextureFormat.RFloat);
-        gpu.uvModeTexture = Texture(directory, "UV modes", columns, rows, false, gpu.uvModeTexture);
-        gpu.modeCosts = Texture(directory, "Prediction costs", columns * 51, rows, false, gpu.modeCosts, true,
-                                RenderTextureFormat.RGFloat);
-        gpu.shortlist =
-            Texture(directory, "Prediction shortlist", columns * 2, rows, false, gpu.shortlist, true);
+        gpu.chromaCandidateTexture = Texture(directory, "UV candidates", columns * 8, rows, false,
+                                             gpu.chromaCandidateTexture, true, RenderTextureFormat.RFloat);
+        gpu.chromaModeTexture = Texture(directory, "UV modes", columns, rows, false, gpu.chromaModeTexture);
+        gpu.predictionCostTexture = Texture(directory, "Prediction costs", columns * 51, rows, false,
+                                            gpu.predictionCostTexture, true, RenderTextureFormat.RGFloat);
+        gpu.predictionShortlistTexture =
+            Texture(directory, "Prediction predictionShortlistTexture", columns * 2, rows, false,
+                    gpu.predictionShortlistTexture, true);
         gpu.modeTexture = Texture(directory, "Prediction modes", w / 8, h / 8, false, gpu.modeTexture);
         gpu.cflTexture = Texture(directory, "Chroma prediction", w / 8, h / 8, false, gpu.cflTexture);
         if (!subsampleChroma)
             gpu.chromaTexture =
                 Texture(directory, "Chroma 444 scratch", columns * 32, rows, false, gpu.chromaTexture, true);
-        gpu.quantA = Texture(directory, "Quant A", w, h / 8 * (subsampleChroma ? 12 : 24), false, gpu.quantA);
-        gpu.reconA =
-            Texture(directory, "Reconstruction A", w, h / 8 * (subsampleChroma ? 12 : 24), false, gpu.reconA);
-        gpu.reconB =
-            Texture(directory, "Reconstruction B", w, h / 8 * (subsampleChroma ? 12 : 24), false, gpu.reconB);
+        gpu.quantizedTexture = Texture(directory, "Quantized coefficients", w,
+                                       h / 8 * (subsampleChroma ? 12 : 24), false, gpu.quantizedTexture);
+        gpu.reconstructionTexture =
+            Texture(directory, "Reconstruction", w, h / 8 * (subsampleChroma ? 12 : 24), false,
+                    gpu.reconstructionTexture);
+        gpu.filteredTexture = Texture(directory, "Filtered reconstruction", w,
+                                      h / 8 * (subsampleChroma ? 12 : 24), false, gpu.filteredTexture);
         gpu.packedTexture =
             Texture(directory, "Coefficients", 512,
                     (w / 8 * (h / 8) * (subsampleChroma ? 99 : 195) + 511) / 512, false, gpu.packedTexture);
@@ -183,25 +186,25 @@ public static class AvifEncoderSetup
     {
         var pixels = new Color[16384];
         pixels[0] = new Color(19132, 32767, 32767, 0);
-        CdfFamily(pixels, AvifTables.CreatePartition16Default(), 3, 9);
-        CdfFamily(pixels, AvifTables.CreatePartition32Default(), 39, 9);
-        CdfFamily(pixels, AvifTables.CreatePartition64Default(), 75, 9);
-        CdfFamily(pixels, AvifTables.CreateTxTypeDefault(), 112, 4);
-        CdfFamily(pixels, AvifTables.CreateEob64Default(), 268, 6);
-        CdfFamily(pixels, AvifTables.CreateEob16Default(), 316, 4);
-        CdfFamily(pixels, AvifTables.CreateIntraYDefault(), 3300, 12);
-        CdfFamily(pixels, AvifTables.CreateIntraUvDefault(), 2928, 13);
-        CdfFamily(pixels, AvifTables.CreateAngleDeltaDefault(), 3210, 6);
-        CdfFamily(pixels, AvifTables.CreateCflSignDefault(), 3109, 7);
-        CdfFamily(pixels, AvifTables.CreateCflAlphaDefault(), 3116, 15);
-        SmallCdfFamily(pixels, AvifTables.CreateSkipDefault(), 3900);
-        SmallCdfFamily(pixels, AvifTables.CreateAllZeroDefault(), 164);
-        SmallCdfFamily(pixels, AvifTables.CreateEobExtra8Default(), 348);
-        SmallCdfFamily(pixels, AvifTables.CreateEobExtra4Default(), 388);
-        SmallCdfFamily(pixels, AvifTables.CreateCoeffBaseEobDefault(), 412);
-        SmallCdfFamily(pixels, AvifTables.CreateCoeffBaseDefault(), 540);
-        SmallCdfFamily(pixels, AvifTables.CreateCoeffBrDefault(), 1788);
-        SmallCdfFamily(pixels, AvifTables.CreateDcSignDefault(), 2796);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreatePartition16Default(), 3, 9);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreatePartition32Default(), 39, 9);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreatePartition64Default(), 75, 9);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreateTxTypeDefault(), 112, 4);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreateEob64Default(), 268, 6);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreateEob16Default(), 316, 4);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreateIntraYDefault(), 3300, 12);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreateIntraUvDefault(), 2928, 13);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreateAngleDeltaDefault(), 3210, 6);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreateCflSignDefault(), 3109, 7);
+        CdfFamily(pixels, AvifProbabilityDefaults.CreateCflAlphaDefault(), 3116, 15);
+        SmallCdfFamily(pixels, AvifProbabilityDefaults.CreateSkipDefault(), 3900);
+        SmallCdfFamily(pixels, AvifProbabilityDefaults.CreateAllZeroDefault(), 164);
+        SmallCdfFamily(pixels, AvifProbabilityDefaults.CreateEobExtra8Default(), 348);
+        SmallCdfFamily(pixels, AvifProbabilityDefaults.CreateEobExtra4Default(), 388);
+        SmallCdfFamily(pixels, AvifProbabilityDefaults.CreateCoeffBaseEobDefault(), 412);
+        SmallCdfFamily(pixels, AvifProbabilityDefaults.CreateCoeffBaseDefault(), 540);
+        SmallCdfFamily(pixels, AvifProbabilityDefaults.CreateCoeffBrDefault(), 1788);
+        SmallCdfFamily(pixels, AvifProbabilityDefaults.CreateDcSignDefault(), 2796);
         var texture = new Texture2D(1024, 16, TextureFormat.RGBAFloat, false, true);
         texture.name = "AV1 initial probabilities";
         texture.filterMode = FilterMode.Point;

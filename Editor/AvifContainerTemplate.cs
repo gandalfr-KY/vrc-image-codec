@@ -16,17 +16,21 @@ public class AvifContainerTemplate
     {
         var builder = new AvifContainerTemplate { width = width, height = height,
                                                   subsampleChroma = entropy.subsampleChroma };
-        var bytes = new byte[1024 * 3 * 4];
+        var bytes = new byte[1024 * 4 * 4];
         var sizes = new Vector4();
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 4; i++)
         {
-            var header = builder.Build(i == 0 ? 1 : i == 1 ? 128 : 16384);
+            var header = builder.Build(1 << (i * 7));
             Buffer.BlockCopy(header, 0, bytes, i * 4096, header.Length);
             sizes[i] = header.Length;
         }
+        if (entropy.containerHeaders && entropy.containerHeaders.height != 4)
+        {
+            entropy.containerHeaders.Reinitialize(1024, 4, TextureFormat.RGBA32, false);
+        }
         if (!entropy.containerHeaders)
         {
-            entropy.containerHeaders = new Texture2D(1024, 3, TextureFormat.RGBA32, false, true);
+            entropy.containerHeaders = new Texture2D(1024, 4, TextureFormat.RGBA32, false, true);
             entropy.containerHeaders.name = "AVIF container headers";
             entropy.containerHeaders.filterMode = FilterMode.Point;
             AssetDatabase.CreateAsset(entropy.containerHeaders, AssetDatabase.GenerateUniqueAssetPath(
@@ -42,7 +46,7 @@ public class AvifContainerTemplate
     }
     private byte[] file, header;
     private int fileCursor, headerBits;
-    private void HeaderBits(int value, int count)
+    private void WriteHeaderBits(int value, int count)
     {
         for (int k = count - 1; k >= 0; k--)
         {
@@ -54,26 +58,26 @@ public class AvifContainerTemplate
     {
         header = new byte[64];
         headerBits = 0;
-        HeaderBits(subsampleChroma ? 0 : 1, 3);
-        HeaderBits(1, 1);
-        HeaderBits(1, 1);
-        HeaderBits(width * height > 665856 ? 8 : 4, 5);
-        HeaderBits(15, 4);
-        HeaderBits(15, 4);
-        HeaderBits(width - 1, 16);
-        HeaderBits(height - 1, 16);
-        HeaderBits(2, 6);
-        HeaderBits(0, 1);
-        if (subsampleChroma) HeaderBits(0, 1);
-        HeaderBits(1, 1);
-        HeaderBits(1, 8);
-        HeaderBits(13, 8);
-        HeaderBits(6, 8);
-        HeaderBits(1, 1);
-        if (subsampleChroma) HeaderBits(0, 2);
-        HeaderBits(0, 1);
-        HeaderBits(0, 1);
-        HeaderBits(1, 1);
+        WriteHeaderBits(subsampleChroma ? 0 : 1, 3);
+        WriteHeaderBits(1, 1);
+        WriteHeaderBits(1, 1);
+        WriteHeaderBits(width * height > 665856 ? 8 : 4, 5);
+        WriteHeaderBits(15, 4);
+        WriteHeaderBits(15, 4);
+        WriteHeaderBits(width - 1, 16);
+        WriteHeaderBits(height - 1, 16);
+        WriteHeaderBits(2, 6);
+        WriteHeaderBits(0, 1);
+        if (subsampleChroma) WriteHeaderBits(0, 1);
+        WriteHeaderBits(1, 1);
+        WriteHeaderBits(1, 8);
+        WriteHeaderBits(13, 8);
+        WriteHeaderBits(6, 8);
+        WriteHeaderBits(1, 1);
+        if (subsampleChroma) WriteHeaderBits(0, 2);
+        WriteHeaderBits(0, 1);
+        WriteHeaderBits(0, 1);
+        WriteHeaderBits(1, 1);
         var result = new byte[(headerBits + 7) / 8];
         Array.Copy(header, result, result.Length);
         return result;
@@ -82,78 +86,78 @@ public class AvifContainerTemplate
     {
         header = new byte[64];
         headerBits = 0;
-        HeaderBits(0, 1);
-        HeaderBits(0, 1);
-        HeaderBits(0, 1);
-        HeaderBits(1, 1);
-        if (width > 64) HeaderBits(0, 1);
-        if (height > 64) HeaderBits(0, 1);
-        HeaderBits(quantizerIndex, 8);
-        HeaderBits(0, 1);
+        WriteHeaderBits(0, 1);
+        WriteHeaderBits(0, 1);
+        WriteHeaderBits(0, 1);
+        WriteHeaderBits(1, 1);
+        if (width > 64) WriteHeaderBits(0, 1);
+        if (height > 64) WriteHeaderBits(0, 1);
+        WriteHeaderBits(quantizerIndex, 8);
+        WriteHeaderBits(0, 1);
         for (int component = 0; component < 2; component++)
         {
-            HeaderBits(1, 1);
-            HeaderBits((-16) & 127, 7);
+            WriteHeaderBits(1, 1);
+            WriteHeaderBits((-16) & 127, 7);
         }
-        HeaderBits(0, 1); // Quantization matrices disabled in the selected profile.
-        HeaderBits(0, 2);
-        HeaderBits(0, 6);
-        HeaderBits(0, 6);
-        HeaderBits(0, 3);
-        HeaderBits(0, 1);
-        HeaderBits(1, 2);
-        HeaderBits(0, 2);
-        HeaderBits(26, 6);
-        HeaderBits(0, 6);
-        HeaderBits(0, 1);
-        HeaderBits(1, 1);
+        WriteHeaderBits(0, 1); // Quantization matrices disabled in the selected profile.
+        WriteHeaderBits(0, 2);
+        WriteHeaderBits(0, 6);
+        WriteHeaderBits(0, 6);
+        WriteHeaderBits(0, 3);
+        WriteHeaderBits(0, 1);
+        WriteHeaderBits(1, 2);
+        WriteHeaderBits(0, 2);
+        WriteHeaderBits(26, 6);
+        WriteHeaderBits(0, 6);
+        WriteHeaderBits(0, 1);
+        WriteHeaderBits(1, 1);
         var result = new byte[(headerBits + 7) / 8];
         Array.Copy(header, result, result.Length);
         return result;
     }
-    private void FByte(int value)
+    private void WriteByte(int value)
     {
         file[fileCursor++] = (byte)(value & 255);
     }
-    private void UInt(int value, int bytes)
+    private void WriteBigEndian(int value, int bytes)
     {
         for (int i = bytes - 1; i >= 0; i--)
-            FByte(value >> (8 * i));
+            WriteByte(value >> (8 * i));
     }
-    private void Text(string value)
+    private void WriteAscii(string value)
     {
         for (int i = 0; i < value.Length; i++)
-            FByte(value[i]);
+            WriteByte(value[i]);
     }
-    private void Patch(int at, int value)
+    private void PatchSize(int at, int value)
     {
         for (int i = 0; i < 4; i++)
             file[at + i] = (byte)((value >> (24 - i * 8)) & 255);
     }
-    private int Box(string type)
+    private int BeginBox(string type)
     {
         int at = fileCursor;
-        UInt(0, 4);
-        Text(type);
+        WriteBigEndian(0, 4);
+        WriteAscii(type);
         return at;
     }
-    private int Full(string type, int version)
+    private int BeginFullBox(string type, int version)
     {
-        int at = Box(type);
-        UInt(version << 24, 4);
+        int at = BeginBox(type);
+        WriteBigEndian(version << 24, 4);
         return at;
     }
-    private void End(int at)
+    private void EndBox(int at)
     {
-        Patch(at, fileCursor - at);
+        PatchSize(at, fileCursor - at);
     }
-    private void Leb(int value)
+    private void WriteLeb128(int value)
     {
         do
         {
             int part = value & 127;
             value >>= 7;
-            FByte(part | (value != 0 ? 128 : 0));
+            WriteByte(part | (value != 0 ? 128 : 0));
         } while (value != 0);
     }
     private void Append(byte[] bytes)
@@ -166,88 +170,88 @@ public class AvifContainerTemplate
         byte[] sequence = SequenceHeader(), frame = FrameHeader();
         file = new byte[600];
         fileCursor = 0;
-        int ftyp = Box("ftyp");
-        Text("avif");
-        UInt(0, 4);
-        Text(subsampleChroma ? "avifmif1miafMA1B" : "avifmif1miafMA1A");
-        End(ftyp);
-        int meta = Full("meta", 0), handler = Full("hdlr", 0);
-        UInt(0, 4);
-        Text("pict");
+        int ftyp = BeginBox("ftyp");
+        WriteAscii("avif");
+        WriteBigEndian(0, 4);
+        WriteAscii(subsampleChroma ? "avifmif1miafMA1B" : "avifmif1miafMA1A");
+        EndBox(ftyp);
+        int meta = BeginFullBox("meta", 0), handler = BeginFullBox("hdlr", 0);
+        WriteBigEndian(0, 4);
+        WriteAscii("pict");
         for (int i = 0; i < 13; i++)
-            FByte(0);
-        End(handler);
-        int primary = Full("pitm", 0);
-        UInt(1, 2);
-        End(primary);
-        int location = Full("iloc", 0);
-        FByte(0x44);
-        FByte(0);
-        UInt(1, 2);
-        UInt(1, 2);
-        UInt(0, 2);
-        UInt(1, 2);
+            WriteByte(0);
+        EndBox(handler);
+        int primary = BeginFullBox("pitm", 0);
+        WriteBigEndian(1, 2);
+        EndBox(primary);
+        int location = BeginFullBox("iloc", 0);
+        WriteByte(0x44);
+        WriteByte(0);
+        WriteBigEndian(1, 2);
+        WriteBigEndian(1, 2);
+        WriteBigEndian(0, 2);
+        WriteBigEndian(1, 2);
         int offsetMarker = fileCursor;
-        UInt(0, 4);
+        WriteBigEndian(0, 4);
         int sizeMarker = fileCursor;
-        UInt(0, 4);
-        End(location);
-        int info = Full("iinf", 0);
-        UInt(1, 2);
-        int entry = Full("infe", 2);
-        UInt(1, 2);
-        UInt(0, 2);
-        Text("av01Color");
-        FByte(0);
-        End(entry);
-        End(info);
-        int properties = Box("iprp"), container = Box("ipco"), size = Full("ispe", 0);
-        UInt(width, 4);
-        UInt(height, 4);
-        End(size);
-        int pixels = Full("pixi", 0);
-        FByte(3);
-        FByte(8);
-        FByte(8);
-        FByte(8);
-        End(pixels);
-        int config = Box("av1C");
-        FByte(0x81);
-        FByte((subsampleChroma ? 0 : 32) | (width * height > 665856 ? 8 : 4));
-        FByte(subsampleChroma ? 12 : 0);
-        FByte(0);
-        End(config);
-        int color = Box("colr");
-        Text("nclx");
-        UInt(1, 2);
-        UInt(13, 2);
-        UInt(6, 2);
-        FByte(128);
-        End(color);
-        End(container);
-        int mapping = Full("ipma", 0);
-        UInt(1, 4);
-        UInt(1, 2);
-        FByte(4);
-        FByte(1);
-        FByte(2);
-        FByte(0x83);
-        FByte(4);
-        End(mapping);
-        End(properties);
-        End(meta);
-        int data = Box("mdat"), contentStart = fileCursor;
-        FByte(0x12);
-        FByte(0);
-        FByte(0x0a);
-        Leb(sequence.Length);
+        WriteBigEndian(0, 4);
+        EndBox(location);
+        int info = BeginFullBox("iinf", 0);
+        WriteBigEndian(1, 2);
+        int entry = BeginFullBox("infe", 2);
+        WriteBigEndian(1, 2);
+        WriteBigEndian(0, 2);
+        WriteAscii("av01Color");
+        WriteByte(0);
+        EndBox(entry);
+        EndBox(info);
+        int properties = BeginBox("iprp"), container = BeginBox("ipco"), size = BeginFullBox("ispe", 0);
+        WriteBigEndian(width, 4);
+        WriteBigEndian(height, 4);
+        EndBox(size);
+        int pixels = BeginFullBox("pixi", 0);
+        WriteByte(3);
+        WriteByte(8);
+        WriteByte(8);
+        WriteByte(8);
+        EndBox(pixels);
+        int config = BeginBox("av1C");
+        WriteByte(0x81);
+        WriteByte((subsampleChroma ? 0 : 32) | (width * height > 665856 ? 8 : 4));
+        WriteByte(subsampleChroma ? 12 : 0);
+        WriteByte(0);
+        EndBox(config);
+        int color = BeginBox("colr");
+        WriteAscii("nclx");
+        WriteBigEndian(1, 2);
+        WriteBigEndian(13, 2);
+        WriteBigEndian(6, 2);
+        WriteByte(128);
+        EndBox(color);
+        EndBox(container);
+        int mapping = BeginFullBox("ipma", 0);
+        WriteBigEndian(1, 4);
+        WriteBigEndian(1, 2);
+        WriteByte(4);
+        WriteByte(1);
+        WriteByte(2);
+        WriteByte(0x83);
+        WriteByte(4);
+        EndBox(mapping);
+        EndBox(properties);
+        EndBox(meta);
+        int data = BeginBox("mdat"), contentStart = fileCursor;
+        WriteByte(0x12);
+        WriteByte(0);
+        WriteByte(0x0a);
+        WriteLeb128(sequence.Length);
         Append(sequence);
-        FByte(0x32);
-        Leb(frame.Length + outputSize);
+        WriteByte(0x32);
+        WriteLeb128(frame.Length + outputSize);
         Append(frame);
-        Patch(offsetMarker, contentStart);
-        Patch(sizeMarker, fileCursor - contentStart + outputSize);
-        Patch(data, fileCursor - data + outputSize);
+        PatchSize(offsetMarker, contentStart);
+        PatchSize(sizeMarker, fileCursor - contentStart + outputSize);
+        PatchSize(data, fileCursor - data + outputSize);
         patch = new Vector4(sizeMarker, data, contentStart, frame.Length);
         byte[] result = new byte[fileCursor];
         Array.Copy(file, result, fileCursor);
