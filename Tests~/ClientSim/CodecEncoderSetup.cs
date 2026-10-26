@@ -6,7 +6,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using UdonSharpEditor;
-using TernaryStars;
+using VrcImageCodec;
 using VrcAvif.Encoder.Editor;
 using VRC.SDK3.ClientSim;
 using VRC.SDK3.Components;
@@ -56,11 +56,11 @@ public static class CodecEncoderSetup
             AvifEncoderSetup.EnsurePrograms(typeof(CodecFixtureDriver));
             var drivers = new VRC.Udon.UdonBehaviour[3];
             var backends = new VRC.Udon.UdonBehaviour[3];
-            TernaryAvifEncoder capture = null;
+            AvifEncoder capture = null;
             for (int i = 0; i < 3; i++)
             {
                 AvifEncoderSetup.Create();
-                var encoder = Selection.activeGameObject.GetComponent<TernaryAvifEncoder>();
+                var encoder = Selection.activeGameObject.GetComponent<AvifEncoder>();
                 AvifEncoderSetup.Configure(encoder,
                                            i == 0   ? 1920
                                            : i == 1 ? 360
@@ -84,6 +84,7 @@ public static class CodecEncoderSetup
             observer.capture = UdonSharpEditorUtility.GetBackingUdonBehaviour(capture);
             observer.input = capture.gpuTransform.inputTexture;
             observer.source = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/CodecProduction/Source.png");
+            new GameObject("Codec batch pacing").AddComponent<CodecBatchPacing>().root = Root;
             EditorSceneManager.SaveScene(scene, "Assets/CodecProduction/Tests.unity");
             SessionState.SetString("CodecEncoder.settings", JsonUtility.ToJson(ClientSimSettings.Instance));
             var settings =

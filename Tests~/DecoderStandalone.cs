@@ -23,7 +23,7 @@ class DecoderTest
 {
     static int Main(string[] args)
     {
-        var decoder = new TernaryStars.TernaryAvifDecoder();
+        var decoder = new VrcImageCodec.Reference.AvifDecoderCpu();
         if (args.Length > 3)
         {
             decoder.inputAvif = File.ReadAllBytes(args[3]);

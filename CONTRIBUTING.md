@@ -9,3 +9,5 @@ Validate unknown settings at their public boundary. Keep the coding hot path all
 Run Tools~/check-codec.py after runtime edits and Tools~/check-shaders.py after shader edits. Compare exact AVIF bytes, not only successful decoding. Test package import and actual compiled-Udon processing in Unity; do not launch VRChat automatically. Never modify upstream attribution or replace this package with a native codec dependency.
 
 Run Tools~/check-jpeg.py against the isolated Unity project after JPEG edits. Verify orientation, dimensions and decoded pixels against FFmpeg, including odd dimensions and quality extremes. JPEG readbacks carry metadata/results only; do not introduce CPU image computation or a native codec runtime dependency.
+
+Run Tools~/check-avif-decoder.py and Tools~/check-sampling.py for actual GPU decoder/round-trip changes. The native CPU oracle under Tests~/Reference is test-only. GPU completion and command submission are different timings; measure through the final completion readback.

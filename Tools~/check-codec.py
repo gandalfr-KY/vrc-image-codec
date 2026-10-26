@@ -19,6 +19,8 @@ log = project / "Logs/CodecEncoder"
 log.mkdir(parents=True, exist_ok=True)
 
 if args.prepare:
+    support=project/'Assets/CodecTestSupport';support.mkdir(parents=True,exist_ok=True)
+    shutil.copy2(ROOT/'Tests~/ClientSim/CodecBatchPacing.cs',support/'CodecBatchPacing.cs')
     runtime = project / "Assets/CodecProduction"
     runtime.mkdir(parents=True, exist_ok=True)
     editor = project / "Assets/Editor"

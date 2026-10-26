@@ -11,7 +11,11 @@ Shader "VrcAvif/Syntax"
 
 #include "Av1Events.hlsl"
 #include "UnityCG.cginc"
+#include "CodecCommon.hlsl"
 Texture2D<float4> _Packet, _Prefix;
+int _Chroma444;
+int PacketCount(){return _Chroma444!=0?195:99;}
+int PlaneOffset(int plane){return plane==0?0:plane==1?65:(_Chroma444!=0?130:82);}
 int _Cols, _Rows, _Blocks, _Qctx, _Stride, _Count;
 static const int scan8[64] = {0,  1,  8,  16, 9,  2,  3,  10, 17, 24, 32, 25, 18, 11, 4,  5,
                               12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6,  7,  14, 21, 28,
@@ -26,10 +30,7 @@ uint ReadPacketWord(int id)
     uint4 b = (uint4)round(_Packet.Load(int3(id % 512, id / 512, 0)) * 255);
     return b.x | (b.y << 8) | (b.z << 16) | (b.w << 24);
 }
-float4 PackBytes(uint v)
-{
-    return float4(v & 255, (v >> 8) & 255, (v >> 16) & 255, v >> 24) / 255.;
-}
+float4 PackBytes(uint value) { return CodecBytes(value); }
 int ReadPrefix(int id)
 {
     return id < 0 ? 0 : (int)_Prefix.Load(int3(id % 1024, id / 1024, 0)).r;
@@ -57,17 +58,17 @@ void EmitGolomb(int value)
 }
 int PlaneHeader(int block, int plane)
 {
-    return block * 99 + (plane == 0 ? 0 : plane == 1 ? 65 : 82);
+    return block * PacketCount() + PlaneOffset(plane);
 }
 int ReadCoefficient(int h, int plane, int k)
 {
-    int loc = plane == 0 ? scan8[k] : scan4[k];
+    int loc = plane == 0 || _Chroma444!=0 ? scan8[k] : scan4[k];
     return (int)(ReadPacketWord(h + 1 + loc) & 65535) - 32768;
 }
 bool IsSkippedBlock(int block)
 {
-    return (ReadPacketWord(block * 99) & 255) == 0 && (ReadPacketWord(block * 99 + 65) & 255) == 0 &&
-           (ReadPacketWord(block * 99 + 82) & 255) == 0;
+    return (ReadPacketWord(block * PacketCount()) & 255) == 0 && (ReadPacketWord(block * PacketCount() + 65) & 255) == 0 &&
+           (ReadPacketWord(block * PacketCount() + PlaneOffset(2)) & 255) == 0;
 }
 int ReadDcSign(int block, int plane)
 {
@@ -91,7 +92,7 @@ void GeneratePlaneSyntax(int bx, int by, int plane)
     int block = by * _Cols + bx, h = PlaneHeader(block, plane);
     uint hdr = ReadPacketWord(h);
     int eob = hdr & 255;
-    int tx = plane == 0 ? 1 : 0, pt = plane == 0 ? 0 : 1, ReadTotal = plane == 0 ? 64 : 16;
+    int tx = plane == 0 || _Chroma444!=0 ? 1 : 0, pt = plane == 0 ? 0 : 1, ReadTotal = plane == 0 || _Chroma444!=0 ? 64 : 16;
     int zero = 0;
     if (plane > 0)
         zero = 7 + (by > 0 && ((ReadPacketWord(PlaneHeader(block - _Cols, plane)) >> 8) & 255) != 0 ? 1 : 0) +
@@ -100,8 +101,8 @@ void GeneratePlaneSyntax(int bx, int by, int plane)
     if (eob == 0 || cursor > wanted) return;
     if (plane == 0)
     {
-        int type = (ReadPacketWord(block * 99) >> 24) & 7;
-        EmitEvent(112 + ((ReadPacketWord(block * 99) >> 16) & 255) * 4,
+        int type = (ReadPacketWord(block * PacketCount()) >> 24) & 7;
+        EmitEvent(112 + ((ReadPacketWord(block * PacketCount()) >> 16) & 255) * 4,
                   type == 4   ? 0
                   : type == 0 ? 1
                   : type == 1 ? 3
@@ -110,19 +111,19 @@ void GeneratePlaneSyntax(int bx, int by, int plane)
                   4, 0);
     }
     int eobClass = eob <= 1 ? 0 : firstbithigh((uint)(eob - 1)) + 1;
-    EmitEvent((plane == 0 ? 268 : 316) + (_Qctx * 2 + pt) * (plane == 0 ? 6 : 4), eobClass,
-              plane == 0 ? 6 : 4, 0);
+    EmitEvent((plane == 0 || _Chroma444!=0 ? 268 : 316) + (_Qctx * 2 + pt) * (plane == 0 || _Chroma444!=0 ? 6 : 4), eobClass,
+              plane == 0 || _Chroma444!=0 ? 6 : 4, 0);
     if (eobClass > 1)
     {
         int bottom = (1 << (eobClass - 1)) + 1, shift = eobClass - 2, bit = ((eob - bottom) >> shift) & 1;
-        EmitEvent((plane == 0 ? 348 : 388) + (_Qctx * 2 + pt) * (plane == 0 ? 5 : 3) + shift, bit, 1, 0);
+        EmitEvent((plane == 0 || _Chroma444!=0 ? 348 : 388) + (_Qctx * 2 + pt) * (plane == 0 || _Chroma444!=0 ? 5 : 3) + shift, bit, 1, 0);
         EmitLiteral(eob - bottom - (bit << shift), shift);
     }
     int family = (_Qctx * 2 + tx) * 2 + pt;
     [loop] for (int k = eob - 1; k >= 0; k--)
     {
         if (cursor > wanted) return;
-        int loc = plane == 0 ? scan8[k] : scan4[k];
+        int loc = plane == 0 || _Chroma444!=0 ? scan8[k] : scan4[k];
         uint packed = ReadPacketWord(h + 1 + loc);
         int magnitude = abs((int)(packed & 65535) - 32768);
         if (k == eob - 1)
@@ -178,13 +179,13 @@ void GenerateBlockSyntax(int id, int target)
     int ctx =
         (by > 0 && IsSkippedBlock(block - _Cols) ? 1 : 0) + (bx > 0 && IsSkippedBlock(block - 1) ? 1 : 0);
     EmitEvent(3900 + ctx, skip ? 1 : 0, 1, 0);
-    uint hdr = ReadPacketWord(block * 99);
+    uint hdr = ReadPacketWord(block * PacketCount());
     int mode = (hdr >> 16) & 255;
-    int above = by > 0 ? (ReadPacketWord((block - _Cols) * 99) >> 16) & 255 : 0,
-        left = bx > 0 ? (ReadPacketWord((block - 1) * 99) >> 16) & 255 : 0;
+    int above = by > 0 ? (ReadPacketWord((block - _Cols) * PacketCount()) >> 16) & 255 : 0,
+        left = bx > 0 ? (ReadPacketWord((block - 1) * PacketCount()) >> 16) & 255 : 0;
     EmitEvent(3300 + (modeContext[above] * 5 + modeContext[left]) * 12, mode, 12, 0);
     if (mode >= 1 && mode <= 8) EmitEvent(3210 + (mode - 1) * 6, (hdr >> 27), 6, 0);
-    uint u = ReadPacketWord(block * 99 + 65), v = ReadPacketWord(block * 99 + 82);
+    uint u = ReadPacketWord(block * PacketCount() + 65), v = ReadPacketWord(block * PacketCount() + PlaneOffset(2));
     int au = ((u >> 16) & 255) - 16, av = ((v >> 16) & 255) - 16, uv = u >> 24;
     EmitEvent(2928 + mode * 13, uv, 13, 0);
     if (uv >= 1 && uv <= 8) EmitEvent(3210 + (uv - 1) * 6, 3, 6, 0);

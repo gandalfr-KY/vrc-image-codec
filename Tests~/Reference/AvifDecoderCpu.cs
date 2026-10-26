@@ -6,12 +6,13 @@ using UnityEngine;
 using VRC.SDK3.Rendering;
 using VRC.SDKBase;
 
-namespace TernaryStars
+namespace VrcImageCodec.Reference
 {
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
-public class TernaryAvifDecoder : UdonSharpBehaviour
+public class AvifDecoderCpu : UdonSharpBehaviour
 {
     public byte[] inputAvif;
+    [HideInInspector] public bool subsampleChroma = true;
     public Material material;
     public float frameBudgetMs = 2;
     public int diagonalsPerFrame = 8;
@@ -33,9 +34,6 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
     private uint difference, range;
     private int rangeCount, partition8Cdf, partition8Count;
     private float startedAt;
-    private Texture2D upload;
-    private RenderTexture quant, recon, filtered, mode, uvMode, scratch, output;
-    private int diagonal;
     private readonly int[] locations = { 0,  1,  6, 6,  21, 1,  6,  6,  21, 21, 6,  6, 21,
                                          21, 21, 6, 21, 21, 21, 21, 21, 21, 21, 21, 21 };
 
@@ -63,7 +61,7 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
         signs = new int[levels.Length];
         predictionModes = new int[cols * rows];
         skippedBlocks = new bool[cols * rows];
-        coefficients = new byte[512 * ((cols * rows * 99 + 511) / 512) * 4];
+        coefficients = new byte[512 * ((cols * rows * PacketWords() + 511) / 512) * 4];
         range = 32768;
         difference = 0x7fffffff;
         rangeCount = -15;
@@ -265,7 +263,9 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
         }
         bitAt = at * 8;
         headerEnd = at + sequenceLength;
-        Expect(0, 3);
+        int profile = Bits(3);
+        if (profile != 0 && profile != 1) { Fail("Unsupported AV1 color profile."); return false; }
+        subsampleChroma = profile == 0;
         Expect(1, 1);
         Expect(1, 1);
         int level = Bits(5);
@@ -279,15 +279,15 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
             Fail("Unsupported AVIF dimensions or AV1 level.");
             return false;
         }
-        Expect(2, 6);
-        Expect(0, 1);
-        Expect(0, 1);
+        Expect(2,6);
+        Expect(0,1);
+        if (subsampleChroma) Expect(0,1);
         Expect(1, 1);
         Expect(1, 8);
         Expect(13, 8);
         Expect(6, 8);
-        Expect(1, 1);
-        Expect(0, 2);
+        Expect(1,1);
+        if (subsampleChroma) Expect(0,2);
         Expect(0, 1);
         Expect(0, 1);
         Expect(1, 1);
@@ -538,7 +538,7 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
     }
     private void PredictionModes(int bx, int by)
     {
-        int block = by * cols + bx, offset = block * 396;
+        int block = by*cols+bx, offset = block*PacketWords()*4;
         int above = by > 0 ? predictionModes[block - cols] : 0, left = bx > 0 ? predictionModes[block - 1] : 0;
         int prediction = Adaptive(intraY, 3300, (modeContexts[above] * 5 + modeContexts[left]) * 12, 12);
         int delta = prediction >= 1 && prediction <= 8 ? Adaptive(angleDelta, 3210, (prediction - 1) * 6, 6) : 3;
@@ -566,21 +566,25 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
             Fail("Unsupported chroma prediction.");
             return;
         }
+        if (!subsampleChroma && uv != 0)
+        {
+            Fail("Unsupported 4:4:4 chroma prediction.");
+            return;
+        }
         coefficients[offset + 65 * 4 + 2] = (byte)(au + 16);
-        coefficients[offset + 82 * 4 + 2] = (byte)(av + 16);
-        coefficients[offset + 65 * 4 + 3] = coefficients[offset + 82 * 4 + 3] = (byte)uv;
+        coefficients[offset + PlaneHeader(2) * 4 + 2] = (byte)(av + 16);
+        coefficients[offset + 65 * 4 + 3] = coefficients[offset + PlaneHeader(2) * 4 + 3] = (byte)uv;
     }
+    private int PacketWords(){return subsampleChroma ? 99 : 195;}
+    private int PlaneHeader(int plane){return plane==0 ? 0 : plane==1 ? 65 : subsampleChroma ? 82 : 130;}
     private void Plane(int bx, int by, int plane)
     {
         int block = by * cols + bx,
-            header = (block * 99 + (plane == 0   ? 0
-                                    : plane == 1 ? 65
-                                                 : 82)) *
-                     4,
+            header = (block*PacketWords()+PlaneHeader(plane))*4,
             offset = header + 4;
-        int tx = plane == 0 ? 1 : 0, pt = plane == 0 ? 0 : 1, total = plane == 0 ? 64 : 16, n = plane == 0 ? 8 : 4,
+        int tx = plane == 0 || !subsampleChroma ? 1 : 0, pt = plane == 0 ? 0 : 1, total = plane == 0 || !subsampleChroma ? 64 : 16, n = plane == 0 || !subsampleChroma ? 8 : 4,
             mi = block * 3 + plane;
-        int[] scan = plane == 0 ? scan8 : scan4;
+        int[] scan = plane == 0 || !subsampleChroma ? scan8 : scan4;
         int[] values = coefficientValues;
         Array.Clear(values, 0, total);
         int zeroContext =
@@ -594,12 +598,12 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
             coefficients[header + 3] |= (byte)(type == 0 ? 4 : type == 1 ? 0 : type == 2 ? 3 : type == 3 ? 1 : 2);
         }
         int eobClass =
-            plane == 0 ? Adaptive(eob64, 268, (qctx * 2 + pt) * 6, 6) : Adaptive(eob16, 316, (qctx * 2 + pt) * 4, 4);
+            plane == 0 || !subsampleChroma ? Adaptive(eob64, 268, (qctx * 2 + pt) * 6, 6) : Adaptive(eob16, 316, (qctx * 2 + pt) * 4, 4);
         int eob = eobClass == 0 ? 1 : eobClass == 1 ? 2 : (1 << (eobClass - 1)) + 1;
         if (eobClass > 1)
         {
             int shift = eobClass - 2;
-            eob += (Small((plane == 0 ? 348 : 388) + (qctx * 2 + pt) * (plane == 0 ? 5 : 3) + shift, 1) << shift) +
+            eob += (Small((plane == 0 || !subsampleChroma ? 348 : 388) + (qctx * 2 + pt) * (plane == 0 || !subsampleChroma ? 5 : 3) + shift, 1) << shift) +
                    Literal(shift);
         }
         coefficients[header] = (byte)eob;
@@ -686,146 +690,8 @@ public class TernaryAvifDecoder : UdonSharpBehaviour
         coefficients[header + 1] = (byte)levels[mi];
     }
     // Entropy state stays on the CPU; reconstruction only uploads coefficients.
-    private RenderTexture Surface(int w, int h, RenderTextureFormat format, bool srgb)
-    {
-        var texture =
-            new RenderTexture(w, h, 0, format, srgb ? RenderTextureReadWrite.sRGB : RenderTextureReadWrite.Linear);
-        texture.filterMode = FilterMode.Point;
-        texture.wrapMode = TextureWrapMode.Clamp;
-        texture.useMipMap = false;
-        texture.antiAliasing = 1;
-        texture.Create();
-        return texture;
-    }
-    private void ReleaseSurfaces()
-    {
-        if (upload)
-            Destroy(upload);
-        if (quant)
-        {
-            quant.Release();
-            Destroy(quant);
-        }
-        if (recon)
-        {
-            recon.Release();
-            Destroy(recon);
-        }
-        if (filtered)
-        {
-            filtered.Release();
-            Destroy(filtered);
-        }
-        if (mode)
-        {
-            mode.Release();
-            Destroy(mode);
-        }
-        if (uvMode)
-        {
-            uvMode.Release();
-            Destroy(uvMode);
-        }
-        if (scratch)
-        {
-            scratch.Release();
-            Destroy(scratch);
-        }
-        if (output)
-        {
-            output.Release();
-            Destroy(output);
-        }
-    }
-    private void OnDestroy()
-    {
-        ReleaseSurfaces();
-    }
-    private void BeginReconstruction()
-    {
-        if (!output || output.width != width || output.height != height)
-        {
-            ReleaseSurfaces();
-            upload = new Texture2D(512, coefficients.Length / 2048, TextureFormat.RGBA32, false, true);
-            upload.filterMode = FilterMode.Point;
-            upload.wrapMode = TextureWrapMode.Clamp;
-            quant = Surface(width, rows * 12, RenderTextureFormat.ARGB32, false);
-            recon = Surface(width, rows * 12, RenderTextureFormat.ARGB32, false);
-            filtered = Surface(width, rows * 12, RenderTextureFormat.ARGB32, false);
-            mode = Surface(cols, rows, RenderTextureFormat.ARGB32, false);
-            uvMode = Surface(cols, rows, RenderTextureFormat.ARGB32, false);
-            scratch = Surface(cols * 16, rows, RenderTextureFormat.ARGBFloat, false);
-            output = Surface(width, height, RenderTextureFormat.ARGB32, true);
-        }
-        upload.LoadRawTextureData(coefficients);
-        upload.Apply(false, false);
-        material.SetVector("_PhotoSize", new Vector4(width, height, cols, rows));
-        material.SetVector("_AtlasSize", new Vector4(width, rows * 12, 0, 0));
-        material.SetVector("_PackedSize", new Vector4(upload.width, upload.height, 0, 0));
-        material.SetTexture("_DecodedTex", upload);
-        material.SetInt("_QuantDc", dcQuant[quantizerIndex]);
-        material.SetInt("_QuantAc", acQuant[quantizerIndex]);
-        material.SetInt("_QuantUvDc", dcQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
-        material.SetInt("_QuantUvAc", acQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
-        material.SetTexture("_QuantTex", quant);
-        material.SetTexture("_ReconTex", recon);
-        material.SetTexture("_ModeTex", mode);
-        material.SetTexture("_UvModeTex", uvMode);
-        material.SetTexture("_CflTex", uvMode);
-        material.SetTexture("_OptimizedTex", scratch);
-        material.SetInt("_DecodeChroma", 0);
-        VRCGraphics.Blit(Texture2D.blackTexture, mode, material, 17);
-        material.SetInt("_DecodeChroma", 1);
-        VRCGraphics.Blit(Texture2D.blackTexture, uvMode, material, 17);
-        VRCGraphics.Blit(Texture2D.blackTexture, recon);
-        data = coefficients = null;
-        levels = signs = predictionModes = null;
-        skippedBlocks = null;
-        stage = 1;
-        diagonal = 0;
-    }
-    private void Reconstruct()
-    {
-        // Per-instance material properties are set before each submission so duplicated decoders cannot mix inputs.
-        material.SetVector("_PhotoSize", new Vector4(width, height, cols, rows));
-        material.SetVector("_AtlasSize", new Vector4(width, rows * 12, 0, 0));
-        material.SetVector("_PackedSize", new Vector4(upload.width, upload.height, 0, 0));
-        material.SetTexture("_DecodedTex", upload);
-        material.SetTexture("_QuantTex", quant);
-        material.SetTexture("_ReconTex", recon);
-        material.SetTexture("_ModeTex", mode);
-        material.SetTexture("_UvModeTex", uvMode);
-        material.SetTexture("_CflTex", uvMode);
-        material.SetTexture("_OptimizedTex", scratch);
-        material.SetInt("_QuantDc", dcQuant[quantizerIndex]);
-        material.SetInt("_QuantAc", acQuant[quantizerIndex]);
-        material.SetInt("_QuantUvDc", dcQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
-        material.SetInt("_QuantUvAc", acQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
-        int diagonals = cols + 2 * rows - 2;
-        for (int i = 0; i < Mathf.Max(1, diagonalsPerFrame) && diagonal < diagonals; i++, diagonal++)
-        {
-            material.SetInt("_Diagonal", diagonal);
-            for (int plane = 0; plane < 2; plane++)
-            {
-                material.SetInt("_ChromaStage", plane);
-                VRCGraphics.Blit(Texture2D.blackTexture, quant, material, 18);
-                VRCGraphics.Blit(Texture2D.blackTexture, scratch, material, 15);
-                VRCGraphics.Blit(Texture2D.blackTexture, recon, material, 2);
-            }
-        }
-        progress = .75f + .25f * diagonal / diagonals;
-        if (diagonal < diagonals)
-            return;
-        VRCGraphics.Blit(Texture2D.blackTexture, mode, material, 9);
-        VRCGraphics.Blit(recon, filtered, material, 10);
-        material.SetTexture("_ReconTex", filtered);
-        VRCGraphics.Blit(Texture2D.blackTexture, output, material, 19);
-        resultTexture = output;
-        busy = false;
-        complete = true;
-        progress = 1;
-    }
-
+    private void BeginReconstruction(){busy=false;complete=true;}
+    private void Reconstruct(){}
     private int[] intraYDefault = AvifTables.CreateIntraYDefault();
     private int[] intraY;
     private int[] intraUvDefault = AvifTables.CreateIntraUvDefault();

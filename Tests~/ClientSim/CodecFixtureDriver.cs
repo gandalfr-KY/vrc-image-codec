@@ -1,13 +1,13 @@
 using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
-using TernaryStars;
+using VrcImageCodec;
 
 // Fixture injection is test-only; encoding still executes in the production GPU backend.
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class CodecFixtureDriver : UdonSharpBehaviour
 {
-    public TernaryAvifGpuEntropy backend;
+    public AvifGpuEntropy backend;
     public Texture2D coefficients;
     public RenderTexture packet;
     public int quantizerIndex;

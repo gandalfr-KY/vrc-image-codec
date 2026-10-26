@@ -2,12 +2,12 @@ using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
-namespace TernaryStars
+namespace VrcImageCodec
 {
 // Fragment shaders only: no CUDA, native plug-in, ComputeShader or CPU thread.
 // x+2y wavefronts preserve left, above and above-right reconstructed neighbors.
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
-public class TernaryAvifGpuTransform : UdonSharpBehaviour
+public class AvifGpuTransform : UdonSharpBehaviour
 {
     // Keep these aligned with the pass order in Av1Intra.shader.
     private const int PredictionPass = 0, QuantizePass = 1, ReconstructPass = 2, PackPass = 3;
@@ -22,6 +22,8 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
     public RenderTexture inputTexture, sourceYuvTexture;
     public int width = 640, height = 360;
     public int diagonalsPerFrame = 4;
+    public bool subsampleChroma = true;
+    public RenderTexture chromaTexture;
     public bool linearInput = true, flipSourceY = true;
     [HideInInspector]
     public int quantDc, quantAc;
@@ -37,14 +39,18 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
     public void BeginTransform()
     {
         CancelTransform();
-        int cols = width / 8, rows = height / 8;
+        int cols = width / 8, rows = height / 8, tileRows = subsampleChroma ? 12 : 24,
+            packetWords = subsampleChroma ? 99 : 195;
         if (!material || !inputTexture || !sourceYuvTexture || !quantA || !reconA || !reconB ||
             !packedTexture || !modeTexture || !cflTexture || !optimizedTexture || !candidateTexture ||
             !uvCandidates || !uvModeTexture || !modeCosts || !shortlist || width < 16 || height < 16 ||
             width > 1920 || height > 1920 || width * height > 2073600 || width % 8 != 0 || height % 8 != 0 ||
             quantDc <= 0 || quantAc <= 0 || diagonalsPerFrame < 1 || diagonalsPerFrame > 16 ||
-            sourceYuvTexture.width != width || sourceYuvTexture.height != height * 3 / 2 ||
-            quantA.width != cols * 8 || quantA.height != rows * 12 || reconA.width != quantA.width ||
+            (!subsampleChroma &&
+             (!chromaTexture || chromaTexture.width != cols * 32 || chromaTexture.height != rows)) ||
+            sourceYuvTexture.width != width ||
+            sourceYuvTexture.height != height * (subsampleChroma ? 3 : 4) / 2 || quantA.width != cols * 8 ||
+            quantA.height != rows * tileRows || reconA.width != quantA.width ||
             reconA.height != quantA.height || reconB.width != quantA.width ||
             reconB.height != quantA.height || inputTexture.width != width || inputTexture.height != height ||
             modeTexture.width != cols || modeTexture.height != rows || cflTexture.width != cols ||
@@ -54,7 +60,7 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
             uvCandidates.height != rows || uvModeTexture.width != cols || uvModeTexture.height != rows ||
             modeCosts.width != cols * 51 || modeCosts.height != rows || shortlist.width != cols * 2 ||
             shortlist.height != rows || packedTexture.width != 512 ||
-            packedTexture.height != (cols * rows * 99 + 511) / 512)
+            packedTexture.height != (cols * rows * packetWords + 511) / 512)
         {
             error = "AV1 GPU configuration: image=" + width + "x" + height + " q=" + quantDc + "," + quantAc +
                     " source=" + (inputTexture != null) + " material=" + (material != null) +
@@ -65,8 +71,10 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
         }
         startedAt = Time.realtimeSinceStartup;
         elapsedSeconds = submitCpuSeconds = maxStepMs = 0;
+        if (!subsampleChroma) VRCGraphics.Blit(Texture2D.blackTexture, uvModeTexture);
         diagonal = 0;
         diagonals = cols + 2 * rows - 2;
+        material.SetInt("_Chroma444", subsampleChroma ? 0 : 1);
         material.SetVector("_PhotoSize", new Vector4(width, height, cols, rows));
         material.SetVector("_AtlasSize", new Vector4(quantA.width, quantA.height, 0, 0));
         material.SetVector("_PackedSize", new Vector4(packedTexture.width, packedTexture.height, 0, 0));
@@ -117,15 +125,24 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
             VRCGraphics.Blit(Texture2D.blackTexture, candidateTexture, material, CandidatePass);
             VRCGraphics.Blit(Texture2D.blackTexture, modeTexture, material, PredictionPass);
             VRCGraphics.Blit(Texture2D.blackTexture, optimizedTexture, material, OptimizePass);
-            QuantizeAndReconstruct();
+            QuantizeAndReconstruct(optimizedTexture);
 
-            VRCGraphics.Blit(Texture2D.blackTexture, modeCosts, material, CflCostsPass);
-            VRCGraphics.Blit(Texture2D.blackTexture, cflTexture, material, CflPass);
-            VRCGraphics.Blit(Texture2D.blackTexture, uvCandidates, material, UvCandidatePass);
-            VRCGraphics.Blit(Texture2D.blackTexture, uvModeTexture, material, UvModePass);
-            VRCGraphics.Blit(Texture2D.blackTexture, optimizedTexture, material, ChromaOptimizePass);
+            if (subsampleChroma)
+            {
+                VRCGraphics.Blit(Texture2D.blackTexture, modeCosts, material, CflCostsPass);
+                VRCGraphics.Blit(Texture2D.blackTexture, cflTexture, material, CflPass);
+                VRCGraphics.Blit(Texture2D.blackTexture, uvCandidates, material, UvCandidatePass);
+                VRCGraphics.Blit(Texture2D.blackTexture, uvModeTexture, material, UvModePass);
+                VRCGraphics.Blit(Texture2D.blackTexture, optimizedTexture, material, ChromaOptimizePass);
+            }
+            else
+            {
+                material.SetTexture("_OptimizedTex", chromaTexture);
+                VRCGraphics.Blit(Texture2D.blackTexture, chromaTexture, material, ChromaOptimizePass);
+            }
             material.SetInt("_ChromaStage", 1);
-            QuantizeAndReconstruct();
+            QuantizeAndReconstruct(subsampleChroma ? optimizedTexture : chromaTexture);
+            material.SetTexture("_OptimizedTex", optimizedTexture);
         }
         if (diagonal == diagonals)
         {
@@ -140,13 +157,13 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
         submitCpuSeconds += work;
         maxStepMs = Mathf.Max(maxStepMs, work * 1000);
     }
-    private void QuantizeAndReconstruct()
+    private void QuantizeAndReconstruct(RenderTexture work)
     {
         // Each pass samples immutable inputs and writes only its active plane.
         // The scratch surface changes roles only after its previous values
         // have been consumed: optimized coefficients -> inverse rows.
         VRCGraphics.Blit(Texture2D.blackTexture, quantA, material, QuantizePass);
-        VRCGraphics.Blit(Texture2D.blackTexture, optimizedTexture, material, InverseRowsPass);
+        VRCGraphics.Blit(Texture2D.blackTexture, work, material, InverseRowsPass);
         VRCGraphics.Blit(Texture2D.blackTexture, reconA, material, ReconstructPass);
     }
 }

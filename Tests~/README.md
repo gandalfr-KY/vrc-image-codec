@@ -11,11 +11,24 @@ Encoder tests execute the production GPU implementation in an isolated Unity pro
 
 The capture uses `Assets/CodecProduction/Source.png`; preparation derives one from a reference photo if absent. An optional `Logs/CodecEncoder/capture.sha256` adds an exact full-capture reference check. Otherwise only fixture rows claim reference equality. The observer saves elapsed time and actual frame intervals in `results.json`; a 60fps cap is not a guarantee of 60fps. Ordinary hosted CI validates decoder code and shader compilation; full encoding requires the Unity/GPU suite above.
 
-For real Udon/GPU validation, copy `DecoderTrial.cs` to an isolated Unity project's `Assets/Editor`, with the codec and Worlds SDK installed. It remains inactive until explicitly requested and does not launch VRChat or enter Play Mode.
+## GPU AVIF decoder and sampling
 
-Create `Logs/AvifDecoder/jobs.json` with `{"jobs":[{"id":"sample","file":"absolute/path/to/sample.avif"}]}`. Use this encoder's AVIF output. Write `run` to `Logs/AvifDecoder/run.request`. The trial executes compiled Udon, saves a reconstructed YUV atlas and PNG, and records timings in `results.json`. It runs steps continuously, excluding normal frame scheduling waits; its final readback is for validation only. Check `done.txt` or `error.txt`.
+Run `python Tools~/check-avif-decoder.py <isolated-unity-project> --prepare`, refresh Unity, then
+`--run`. Run without flags after both `done.txt` and `stopped.txt` appear. Eighteen inputs cover
+portrait/Full HD, adaptive/frozen CDFs, all quantizer-context families and 4:2:0/4:4:4. The suite
+compares every reconstructed YUV sample with FFmpeg, rejects eight malformed inputs, and cancels
+and reuses a component with an outstanding readback. Verification image readbacks are outside timing.
 
-Run `python Tools~/check-decoder-gpu.py /path/to/UnityProject/Logs/AvifDecoder` to compare all YUV samples with FFmpeg. RGB upsampling/color conversion is distinct from this YUV equality check. Driver timings include the test-only final GPU readback.
+`python Tools~/check-sampling.py <isolated-unity-project> --prepare`, then `--run` and verification,
+checks actual encode/decode round trips at small and Full-HD dimensions for both sampling modes.
+
+Tests~/Reference contains a native C# entropy oracle for coefficient-level regression, excluded from
+Unity packages. Production decoding uses Shaders/Av1Decode.shader and has no CPU coefficient decoder.
+
+For graphics-enabled batch Editor runs, the test-only CodecBatchPacing helper caps the loop at a
+nominal 60fps and exits Play when finished. Actual frame counts and timings are recorded; the cap
+is not a guarantee of 60fps. Do not compare batch and graphical Editor timings as identical conditions.
+
 # GPU JPEG pair
 
 `python Tools~/check-jpeg.py <isolated-unity-project> --prepare` installs the test sources and creates

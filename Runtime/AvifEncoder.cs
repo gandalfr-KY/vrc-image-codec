@@ -1,18 +1,19 @@
 using UdonSharp;
 using UnityEngine;
 
-namespace TernaryStars
+namespace VrcImageCodec
 {
 // Coordinates GPU stages. Image coding and AVIF assembly stay on the GPU.
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
-public class TernaryAvifEncoder : UdonSharpBehaviour
+public class AvifEncoder : UdonSharpBehaviour
 {
     public const int DefaultQuality = 60;
+    public bool subsampleChroma = true;
     public int width = 640, height = 360;
     [Range(0, 100)]
     public int quality = DefaultQuality;
-    public TernaryAvifGpuTransform gpuTransform;
-    public TernaryAvifGpuEntropy gpuEntropy;
+    public AvifGpuTransform gpuTransform;
+    public AvifGpuEntropy gpuEntropy;
     [HideInInspector]
     public byte[] resultAvif;
     [HideInInspector]
@@ -37,12 +38,13 @@ public class TernaryAvifEncoder : UdonSharpBehaviour
         if (!gpuTransform || !gpuEntropy || !gpuTransform.material || !gpuEntropy.syntaxMaterial ||
             !gpuEntropy.cdfMaterial || !gpuEntropy.rangeMaterial || !gpuEntropy.initialCdf ||
             !gpuEntropy.containerHeaders || width != gpuEntropy.width || height != gpuEntropy.height ||
-            quality < 0 || quality > 100)
+            subsampleChroma != gpuEntropy.subsampleChroma || quality < 0 || quality > 100)
         {
             error = "Configure the encoder's GPU resources and dimensions before encoding.";
             return;
         }
         quantizerIndex = Mathf.Clamp((100 - quality) * 255 / 100 + 16, 1, 255);
+        gpuTransform.subsampleChroma = subsampleChroma;
         gpuTransform.width = width;
         gpuTransform.height = height;
         gpuTransform.quantDc = dcQuant[quantizerIndex];

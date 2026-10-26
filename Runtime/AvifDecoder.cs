@@ -1,0 +1,458 @@
+// Restricted still-image AV1 decoding; AOM range arithmetic, BSD-2-Clause + PATENTS.
+using System;
+using UdonSharp;
+using UnityEngine;
+using VRC.SDK3.Rendering;
+using VRC.SDKBase;
+namespace VrcImageCodec
+{
+[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
+public class AvifDecoder : UdonSharpBehaviour
+{
+    public byte[] inputAvif;
+    public Material material;
+    [HideInInspector]
+    public Material entropyMaterial;
+    [HideInInspector]
+    public Texture2D initialCdf;
+    public float frameBudgetMs = 2;
+    public int diagonalsPerFrame = 8;
+    [HideInInspector]
+    public bool subsampleChroma = true;
+    [HideInInspector]
+    public RenderTexture resultTexture;
+    [HideInInspector]
+    public bool busy, complete, readbackPending;
+    [HideInInspector]
+    public string error = "";
+    [HideInInspector]
+    public int width, height, decodedBlocks;
+    [HideInInspector]
+    public float progress, elapsedSeconds, cpuSeconds, maxStepMs;
+    private byte[] data;
+    private bool disableCdfUpdate;
+    private int cols, rows, cursor, limit, stage, at, end, bitAt, headerEnd, quantizerIndex, qctx, diagonal;
+    private float startedAt;
+    private Texture2D upload;
+    private RenderTexture stateA, stateB, packets, status, quant, recon, filtered, mode, uvMode, scratch,
+        chromaScratch, output;
+    private int[] dcQuant = AvifTables.CreateDcQuant(), acQuant = AvifTables.CreateAcQuant();
+
+    public void BeginDecoding()
+    {
+        if (busy || readbackPending) return;
+        CancelDecoding();
+        data = inputAvif;
+        if (data == null || data.Length < 300 || data.Length > 100000 || !material || !entropyMaterial ||
+            !initialCdf)
+        {
+            Fail("AVIF decoding requires configured GPU materials/tables and a 300..100000 byte image.");
+            return;
+        }
+        busy = true;
+        startedAt = Time.realtimeSinceStartup;
+        if (!ReadProfile()) return;
+        cols = width / 8;
+        rows = height / 8;
+        qctx = quantizerIndex <= 20 ? 0 : quantizerIndex <= 60 ? 1 : quantizerIndex <= 120 ? 2 : 3;
+        int inputRows = (data.Length + 4095) / 4096;
+        if (!upload || upload.height != inputRows)
+        {
+            if (upload) Destroy(upload);
+            upload = new Texture2D(1024, inputRows, TextureFormat.RGBA32, false, true);
+            upload.filterMode = FilterMode.Point;
+            upload.wrapMode = TextureWrapMode.Clamp;
+        }
+        byte[] bytes = new byte[inputRows * 4096];
+        Array.Copy(data, bytes, data.Length);
+        upload.LoadRawTextureData(bytes);
+        upload.Apply(false, false);
+        int stateRows = (16386 + cols * rows * 2 + 1023) / 1024;
+        stateA = CodecBuffers.Surface(stateA, 1024, stateRows, RenderTextureFormat.ARGBFloat);
+        stateB = CodecBuffers.Surface(stateB, 1024, stateRows, RenderTextureFormat.ARGBFloat);
+        packets =
+            CodecBuffers.Surface(packets, 1024, (cols * rows * (subsampleChroma ? 99 : 195) + 1023) / 1024,
+                                 RenderTextureFormat.ARGB32);
+        status = CodecBuffers.Surface(status, 1, 1, RenderTextureFormat.ARGB32);
+        entropyMaterial.SetTexture("_Bytes", upload);
+        entropyMaterial.SetTexture("_Initial", initialCdf);
+        entropyMaterial.SetInt("_Start", bitAt / 8);
+        entropyMaterial.SetInt("_End", end);
+        entropyMaterial.SetInt("_Cols", cols);
+        entropyMaterial.SetInt("_Rows", rows);
+        entropyMaterial.SetInt("_Qctx", qctx);
+        entropyMaterial.SetInt("_Subsampled", subsampleChroma ? 1 : 0);
+        entropyMaterial.SetInt("_DisableCdf", disableCdfUpdate ? 1 : 0);
+        VRCGraphics.Blit(Texture2D.blackTexture, stateA, entropyMaterial, 0);
+        cursor = stage = decodedBlocks = 0;
+        limit = ((cols + 7) / 8) * ((rows + 7) / 8) * 64;
+    }
+    public void CancelDecoding()
+    {
+        busy = complete = false;
+        error = "";
+        progress = elapsedSeconds = cpuSeconds = maxStepMs = 0;
+        resultTexture = null;
+        data = null;
+    }
+    private void Update()
+    {
+        if (busy) StepDecoding();
+    }
+    public void StepDecoding()
+    {
+        if (!busy || readbackPending) return;
+        float before = Time.realtimeSinceStartup;
+        if (stage == 0)
+        {
+            if (readbackPending) return;
+            float until = before + Mathf.Max(.25f, frameBudgetMs) * .001f;
+            do
+            {
+                entropyMaterial.SetInt("_ChunkStart", cursor);
+                entropyMaterial.SetTexture("_State", stateA);
+                VRCGraphics.Blit(Texture2D.blackTexture, stateB, entropyMaterial, 3);
+                entropyMaterial.SetInt("_OutputHeight", stateB.height);
+                VRCGraphics.Blit(Texture2D.blackTexture, stateB, entropyMaterial, 1);
+                entropyMaterial.SetInt("_OutputHeight", packets.height);
+                VRCGraphics.Blit(Texture2D.blackTexture, packets, entropyMaterial, 2);
+                RenderTexture swap = stateA;
+                stateA = stateB;
+                stateB = swap;
+                cursor += 16;
+            } while (cursor < limit && Time.realtimeSinceStartup < until);
+            progress = .75f * cursor / limit;
+            if (cursor >= limit)
+            {
+                entropyMaterial.SetTexture("_State", stateA);
+                VRCGraphics.Blit(Texture2D.blackTexture, status, entropyMaterial, 4);
+                readbackPending = true;
+                VRCAsyncGPUReadback.Request(status, 0, TextureFormat.RGBA32, this);
+            }
+        }
+        else
+            Reconstruct();
+        float work = Time.realtimeSinceStartup - before;
+        cpuSeconds += work;
+        maxStepMs = Mathf.Max(maxStepMs, work * 1000);
+        elapsedSeconds = Time.realtimeSinceStartup - startedAt;
+    }
+    public override void OnAsyncGpuReadbackComplete(VRCAsyncGPUReadbackRequest request)
+    {
+        readbackPending = false;
+        if (!busy) return;
+        byte[] bytes = new byte[4];
+        if (request.hasError || !request.TryGetData(bytes))
+        {
+            Fail("AVIF GPU readback failed.");
+            return;
+        }
+        if (stage == 2)
+        {
+            resultTexture = output;
+            busy = false;
+            complete = true;
+            progress = 1;
+            elapsedSeconds = Time.realtimeSinceStartup - startedAt;
+            return;
+        }
+        if (bytes[0] != 0 || bytes[1] != 0 || bytes[2] != 0 || bytes[3] != 0)
+        {
+            Fail("Invalid or unsupported AV1 entropy stream.");
+            return;
+        }
+        decodedBlocks = cols * rows;
+        BeginReconstruction();
+    }
+    private void Fail(string message)
+    {
+        busy = false;
+        complete = false;
+        error = message;
+    }
+    private int UInt32(int pos)
+    {
+        if (pos < 0 || pos > data.Length - 4)
+        {
+            Fail("Truncated AVIF box.");
+            return 0;
+        }
+        uint size = ((uint)data[pos] << 24) | ((uint)data[pos + 1] << 16) | ((uint)data[pos + 2] << 8) |
+                    data[pos + 3];
+        if (size > int.MaxValue)
+        {
+            Fail("Oversized AVIF box.");
+            return 0;
+        }
+        return (int)size;
+    }
+    private bool Tag(int pos, string tag)
+    {
+        if (pos < 0 || pos > data.Length - 4) return false;
+        for (int i = 0; i < 4; i++)
+            if (data[pos + i] != tag[i]) return false;
+        return true;
+    }
+    private int Byte()
+    {
+        if (at >= end)
+        {
+            Fail("Truncated AVIF payload.");
+            return 0;
+        }
+        return data[at++];
+    }
+    private int Leb()
+    {
+        int value = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            int b = Byte();
+            value |= (b & 127) << (7 * i);
+            if (b < 128) return value;
+        }
+        Fail("Invalid OBU length.");
+        return 0;
+    }
+    private int Bits(int count)
+    {
+        if (!busy || bitAt + count > headerEnd * 8)
+        {
+            Fail("Truncated AV1 header.");
+            return 0;
+        }
+        int value = 0;
+        for (int i = 0; i < count; i++)
+            value = (value << 1) | ((data[bitAt >> 3] >> (7 - (bitAt++ & 7))) & 1);
+        return value;
+    }
+    private void Expect(int value, int count)
+    {
+        if (busy && Bits(count) != value)
+            Fail("Unsupported AVIF profile; use this library's single-image encoder.");
+    }
+    private bool ReadProfile()
+    {
+        if (!Tag(4, "ftyp") || !Tag(8, "avif"))
+        {
+            Fail("Not an AVIF image.");
+            return false;
+        }
+        int payload = -1;
+        for (int pos = 0, boxes = 0; pos < data.Length && busy; boxes++)
+        {
+            if (boxes > 16)
+            {
+                Fail("Too many AVIF boxes.");
+                break;
+            }
+            int size = UInt32(pos);
+            if (!busy || size < 8 || size > data.Length - pos)
+            {
+                Fail("Invalid AVIF box bounds.");
+                break;
+            }
+            if (Tag(pos + 4, "mdat"))
+            {
+                if (payload != -1)
+                {
+                    Fail("Multiple AVIF payloads.");
+                    break;
+                }
+                payload = pos + 8;
+                end = pos + size;
+            }
+            pos += size;
+        }
+        if (!busy) return false;
+        if (payload < 0)
+        {
+            Fail("Missing AVIF image payload.");
+            return false;
+        }
+        at = payload;
+        if (Byte() != 0x12 || Byte() != 0 || Byte() != 0x0a)
+        {
+            Fail("Unsupported AV1 sequence.");
+            return false;
+        }
+        int sequenceLength = Leb();
+        if (sequenceLength < 1 || sequenceLength > end - at)
+        {
+            Fail("Invalid sequence bounds.");
+            return false;
+        }
+        bitAt = at * 8;
+        headerEnd = at + sequenceLength;
+        int profile = Bits(3);
+        if (profile != 0 && profile != 1)
+        {
+            Fail("Unsupported AV1 color profile.");
+            return false;
+        }
+        subsampleChroma = profile == 0;
+        Expect(1, 1);
+        Expect(1, 1);
+        int level = Bits(5);
+        Expect(15, 4);
+        Expect(15, 4);
+        width = Bits(16) + 1;
+        height = Bits(16) + 1;
+        if (width < 16 || height < 16 || width > 1920 || height > 1920 || width % 8 != 0 || height % 8 != 0 ||
+            width * height > 2073600 || level != (width * height > 665856 ? 8 : 4))
+        {
+            Fail("Unsupported AVIF dimensions or AV1 level.");
+            return false;
+        }
+        Expect(2, 6);
+        Expect(0, 1);
+        if (subsampleChroma) Expect(0, 1);
+        Expect(1, 1);
+        Expect(1, 8);
+        Expect(13, 8);
+        Expect(6, 8);
+        Expect(1, 1);
+        if (subsampleChroma) Expect(0, 2);
+        Expect(0, 1);
+        Expect(0, 1);
+        Expect(1, 1);
+        while (busy && bitAt < headerEnd * 8)
+            Expect(0, 1);
+        at = headerEnd;
+        if (!busy || Byte() != 0x32)
+        {
+            if (busy) Fail("Missing AV1 frame.");
+            return false;
+        }
+        int frameLength = Leb();
+        if (frameLength != end - at)
+        {
+            Fail("Invalid AV1 frame length.");
+            return false;
+        }
+        bitAt = at * 8;
+        headerEnd = end;
+        // Probability adaptation is signaled per image; reconstruction is unchanged.
+        disableCdfUpdate = Bits(1) != 0;
+        Expect(0, 1);
+        Expect(0, 1);
+        Expect(1, 1);
+        if (width > 64) Expect(0, 1);
+        if (height > 64) Expect(0, 1);
+        quantizerIndex = Bits(8);
+        Expect(0, 1);
+        for (int i = 0; i < 2; i++)
+        {
+            Expect(1, 1);
+            Expect(112, 7);
+        }
+        Expect(0, 1);
+        Expect(0, 2);
+        Expect(0, 6);
+        Expect(0, 6);
+        Expect(0, 3);
+        Expect(0, 1);
+        Expect(1, 2);
+        Expect(0, 2);
+        Expect(26, 6);
+        Expect(0, 6);
+        Expect(0, 1);
+        Expect(1, 1);
+        while (busy && (bitAt & 7) != 0)
+            Expect(0, 1);
+        at = bitAt / 8;
+        if (at >= end || quantizerIndex == 0) Fail("Missing AV1 tile or unsupported lossless mode.");
+        return busy;
+    }
+
+    private void BeginReconstruction()
+    {
+        int atlasRows = rows * (subsampleChroma ? 12 : 24);
+        quant = CodecBuffers.Surface(quant, width, atlasRows, RenderTextureFormat.ARGB32);
+        recon = CodecBuffers.Surface(recon, width, atlasRows, RenderTextureFormat.ARGB32);
+        filtered = CodecBuffers.Surface(filtered, width, atlasRows, RenderTextureFormat.ARGB32);
+        mode = CodecBuffers.Surface(mode, cols, rows, RenderTextureFormat.ARGB32);
+        uvMode = CodecBuffers.Surface(uvMode, cols, rows, RenderTextureFormat.ARGB32);
+        scratch = CodecBuffers.Surface(scratch, cols * 16, rows, RenderTextureFormat.ARGBFloat);
+        if (!subsampleChroma)
+            chromaScratch =
+                CodecBuffers.Surface(chromaScratch, cols * 32, rows, RenderTextureFormat.ARGBFloat);
+        output = CodecBuffers.Surface(output, width, height, RenderTextureFormat.ARGB32, true);
+        material.SetInt("_Chroma444", subsampleChroma ? 0 : 1);
+        material.SetVector("_PhotoSize", new Vector4(width, height, cols, rows));
+        material.SetVector("_AtlasSize", new Vector4(width, atlasRows, 0, 0));
+        material.SetVector("_PackedSize", new Vector4(packets.width, packets.height, 0, 0));
+        material.SetTexture("_DecodedTex", packets);
+        material.SetInt("_QuantDc", dcQuant[quantizerIndex]);
+        material.SetInt("_QuantAc", acQuant[quantizerIndex]);
+        material.SetInt("_QuantUvDc", dcQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
+        material.SetInt("_QuantUvAc", acQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
+        material.SetTexture("_QuantTex", quant);
+        material.SetTexture("_ReconTex", recon);
+        material.SetTexture("_ModeTex", mode);
+        material.SetTexture("_UvModeTex", uvMode);
+        material.SetTexture("_CflTex", uvMode);
+        material.SetTexture("_OptimizedTex", scratch);
+        material.SetInt("_DecodeChroma", 0);
+        VRCGraphics.Blit(Texture2D.blackTexture, mode, material, 17);
+        material.SetInt("_DecodeChroma", 1);
+        VRCGraphics.Blit(Texture2D.blackTexture, uvMode, material, 17);
+        VRCGraphics.Blit(Texture2D.blackTexture, recon);
+        data = null;
+        stage = 1;
+        diagonal = 0;
+    }
+    private void Reconstruct()
+    {
+        // Per-instance material properties are set before each submission so duplicated decoders cannot mix
+        // inputs.
+        material.SetInt("_Chroma444", subsampleChroma ? 0 : 1);
+        material.SetVector("_PhotoSize", new Vector4(width, height, cols, rows));
+        material.SetVector("_AtlasSize", new Vector4(width, rows * (subsampleChroma ? 12 : 24), 0, 0));
+        material.SetVector("_PackedSize", new Vector4(packets.width, packets.height, 0, 0));
+        material.SetTexture("_DecodedTex", packets);
+        material.SetTexture("_QuantTex", quant);
+        material.SetTexture("_ReconTex", recon);
+        material.SetTexture("_ModeTex", mode);
+        material.SetTexture("_UvModeTex", uvMode);
+        material.SetTexture("_CflTex", uvMode);
+        material.SetTexture("_OptimizedTex", scratch);
+        material.SetInt("_QuantDc", dcQuant[quantizerIndex]);
+        material.SetInt("_QuantAc", acQuant[quantizerIndex]);
+        material.SetInt("_QuantUvDc", dcQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
+        material.SetInt("_QuantUvAc", acQuant[Mathf.Clamp(quantizerIndex - 16, 0, 255)]);
+        int diagonals = cols + 2 * rows - 2;
+        for (int i = 0; i < Mathf.Max(1, diagonalsPerFrame) && diagonal < diagonals; i++, diagonal++)
+        {
+            material.SetInt("_Diagonal", diagonal);
+            for (int plane = 0; plane < 2; plane++)
+            {
+                material.SetInt("_ChromaStage", plane);
+                RenderTexture work = !subsampleChroma && plane != 0 ? chromaScratch : scratch;
+                material.SetTexture("_OptimizedTex", work);
+                VRCGraphics.Blit(Texture2D.blackTexture, quant, material, 18);
+                VRCGraphics.Blit(Texture2D.blackTexture, work, material, 15);
+                VRCGraphics.Blit(Texture2D.blackTexture, recon, material, 2);
+            }
+        }
+        progress = .75f + .25f * diagonal / diagonals;
+        if (diagonal < diagonals) return;
+        VRCGraphics.Blit(Texture2D.blackTexture, mode, material, 9);
+        VRCGraphics.Blit(recon, filtered, material, 10);
+        material.SetTexture("_ReconTex", filtered);
+        VRCGraphics.Blit(Texture2D.blackTexture, output, material, 19);
+        // Fence the final RGB pass before publishing completion; pixels stay on the GPU.
+        VRCGraphics.Blit(output, status);
+        stage = 2;
+        readbackPending = true;
+        VRCAsyncGPUReadback.Request(status, 0, TextureFormat.RGBA32, this);
+    }
+
+    private void OnDestroy()
+    {
+        if (upload) Destroy(upload);
+        CodecBuffers.Release(new RenderTexture[] { stateA, stateB, packets, status, quant, recon, filtered,
+                                                   mode, uvMode, scratch, chromaScratch, output });
+    }
+}
+}

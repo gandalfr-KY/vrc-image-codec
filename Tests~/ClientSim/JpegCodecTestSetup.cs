@@ -6,7 +6,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine.SceneManagement;
 using UdonSharpEditor;
-using TernaryStars;
+using VrcImageCodec;
 using VrcAvif.Encoder.Editor;
 using VRC.SDK3.ClientSim;
 using VRC.SDK3.Components;
@@ -18,7 +18,7 @@ public static class JpegCodecTestSetup
     static JpegCodecTestSetup()
     {
         Directory.CreateDirectory(Root);
-        File.WriteAllText(Root + "/version.txt", "jpeg-gpu-v1");
+        File.WriteAllText(Root + "/version.txt", "jpeg-gpu-v2");
         EditorApplication.update += Tick;
     }
     static void Tick()
@@ -57,9 +57,10 @@ public static class JpegCodecTestSetup
             var codec = Selection.activeGameObject;
             var observer = new GameObject("JPEG test observer").AddComponent<JpegCodecObserver>();
             observer.encoder =
-                UdonSharpEditorUtility.GetBackingUdonBehaviour(codec.GetComponent<TernaryJpegEncoder>());
+                UdonSharpEditorUtility.GetBackingUdonBehaviour(codec.GetComponent<JpegEncoder>());
             observer.decoder =
-                UdonSharpEditorUtility.GetBackingUdonBehaviour(codec.GetComponent<TernaryJpegDecoder>());
+                UdonSharpEditorUtility.GetBackingUdonBehaviour(codec.GetComponent<JpegDecoder>());
+            new GameObject("Codec batch pacing").AddComponent<CodecBatchPacing>().root = Root;
             EditorSceneManager.SaveScene(scene, "Assets/JpegCodecTests/Tests.unity");
             SessionState.SetString("JpegCodec.settings", JsonUtility.ToJson(ClientSimSettings.Instance));
             var settings =

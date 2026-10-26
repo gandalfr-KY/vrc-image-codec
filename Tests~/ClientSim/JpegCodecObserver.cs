@@ -18,6 +18,7 @@ public class JpegCodecObserver : MonoBehaviour
         public string id, path;
         public int width, height, quality;
         public bool linear;
+        public bool subsampleChroma;
     }
     [Serializable]
     public class Jobs
@@ -231,6 +232,7 @@ public class JpegCodecObserver : MonoBehaviour
         encoder.SetProgramVariable("height", jobs[job].height);
         encoder.SetProgramVariable("quality", jobs[job].quality);
         encoder.SetProgramVariable("linearInput", jobs[job].linear);
+        encoder.SetProgramVariable("subsampleChroma", jobs[job].subsampleChroma);
         decoder.SetProgramVariable("linearOutput", jobs[job].linear);
         at = Time.realtimeSinceStartupAsDouble;
         phase = 1;

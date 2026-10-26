@@ -1,6 +1,6 @@
 using UdonSharp;
 using UnityEngine;
-using TernaryStars;
+using VrcImageCodec;
 
 namespace VrcAvif.Encoder.Samples
 {
@@ -8,7 +8,7 @@ namespace VrcAvif.Encoder.Samples
 public class MinimalAvifCapture : UdonSharpBehaviour
 {
     public Camera source;
-    public TernaryAvifEncoder encoder;
+    public AvifEncoder encoder;
 
     public void Capture()
     {

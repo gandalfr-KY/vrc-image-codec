@@ -40,7 +40,7 @@ for shader in ["Av1Intra.shader"] if sys.argv[1:] else sorted(p.name for p in S.
         r'#include "([^"]+)"', lambda m: (S / m[1]).read_text(encoding="utf-8"), source
     )
     entries = sys.argv[1:] or list(
-        dict.fromkeys(re.findall(r"#pragma (?:fragment|vertex) (\w+)", text))
+        dict.fromkeys(re.findall(r"#pragma (?:fragment|vertex|geometry) (\w+)", text))
     )
     for entry in entries:
         data = source.encode()
@@ -54,7 +54,7 @@ for shader in ["Av1Intra.shader"] if sys.argv[1:] else sorted(p.name for p in S.
             None,
             None,
             entry.encode(),
-            b"vs_5_0" if entry.startswith("vert") else b"ps_5_0",
+            (b"gs_5_0" if re.search(r"#pragma geometry " + entry + r"\b", text) else b"vs_5_0" if re.search(r"#pragma vertex " + entry + r"\b", text) else b"ps_5_0"),
             4,
             0,
             c.byref(blob),

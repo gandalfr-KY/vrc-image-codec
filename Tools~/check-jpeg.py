@@ -21,6 +21,8 @@ log = project / "Logs/JpegCodec"
 log.mkdir(parents=True, exist_ok=True)
 
 if args.prepare:
+    support=project/'Assets/CodecTestSupport';support.mkdir(parents=True,exist_ok=True)
+    shutil.copy2(ROOT/'Tests~/ClientSim/CodecBatchPacing.cs',support/'CodecBatchPacing.cs')
     runtime = project / "Assets/JpegCodecTests"
     runtime.mkdir(parents=True, exist_ok=True)
     for name in ["JpegCodecTestSetup.cs", "JpegCodecObserver.cs"]:
@@ -46,12 +48,13 @@ if args.prepare:
     (log / "noise.png").write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB",256,256,8,2,0,0,0)) +
                                     chunk(b"IDAT",zlib.compress(noise)) + chunk(b"IEND",b""))
     jobs.insert(4,dict(id="noise-100",path=str(log / "noise.png"),width=256,height=256,quality=100))
+    jobs += [dict(job,id=job['id']+'-420',subsampleChroma=True) for job in jobs]
     (log / "jobs.json").write_text(json.dumps(dict(jobs=jobs),indent=2))
-    print("Prepared. Refresh Unity, then --run after version.txt reads jpeg-gpu-v1.")
+    print("Prepared. Refresh Unity, then --run after version.txt reads jpeg-gpu-v2.")
     raise SystemExit(0)
 
 if args.run:
-    if (log / "version.txt").read_text() != "jpeg-gpu-v1":
+    if (log / "version.txt").read_text() != "jpeg-gpu-v2":
         raise SystemExit("Refresh matching Unity tests first.")
     (log / "prepare.request").write_text("run")
     raise SystemExit(0)
@@ -68,12 +71,23 @@ jobs = json.loads((log / "jobs.json").read_text())["jobs"]
 if [row["id"] for row in results["rows"]] != [job["id"] for job in jobs]:
     raise SystemExit("Incomplete jobs")
 
-def rgb(path):
+def rgb(path, width=0, height=0):
+    if width:
+        # Decode YUV independently, then use the API's explicit 2x nearest chroma grid.
+        # swscale's odd-width resize maps ceil(width/2) to width instead of exact 2x replication.
+        raw = subprocess.check_output(["ffmpeg","-v","error","-i",str(path),"-frames:v","1","-pix_fmt","yuvj420p","-f","rawvideo","-"])
+        ysize=width*height;cw=(width+1)//2;ch=(height+1)//2;result=bytearray(ysize*3)
+        for y in range(height):
+            for x in range(width):
+                at=y*width+x;c=y//2*cw+x//2;v=raw[at];u=raw[ysize+c]-128;w=raw[ysize+cw*ch+c]-128
+                values=(v+1.402*w,v-.344136*u-.714136*w,v+1.772*u)
+                for channel,value in enumerate(values):result[at*3+channel]=min(255,max(0,math.floor(value+.5)))
+        return bytes(result)
     return subprocess.check_output(["ffmpeg", "-v", "error", "-i", str(path), "-frames:v", "1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-"])
 
 for row, job in zip(results["rows"], jobs):
     jpeg = log / (row["id"] + ".jpg")
-    reference = rgb(jpeg)
+    reference = rgb(jpeg,job['width'],job['height']) if job.get('subsampleChroma') else rgb(jpeg)
     actual = rgb(log / (row["id"] + ".png"))
     if len(reference) != job["width"] * job["height"] * 3 or len(actual) != len(reference):
         raise SystemExit("Wrong image dimensions")

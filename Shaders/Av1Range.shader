@@ -10,6 +10,7 @@ Shader "VrcAvif/Range coding"
 
 
 #include "UnityCG.cginc"
+#include "CodecCommon.hlsl"
 // Restricted AV1 range coding, AOM-derived arithmetic. BSD-2-Clause + PATENTS.
 // Save state every 2048 symbols; each output word replays only its suffix.
 Texture2D<float4> _Tokens, _Headers, _Digits, _Counts, _Checkpoints;

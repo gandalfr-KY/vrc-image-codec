@@ -2,18 +2,20 @@
 using System;
 using UnityEngine;
 using UnityEditor;
-using TernaryStars;
+using VrcImageCodec;
 namespace VrcAvif.Encoder.Editor
 {
 // Fixed ISO-BMFF/AV1 header bytes belong to configuration, not per-photo encoding.
 public class AvifContainerTemplate
 {
     private int width, height;
+    private bool subsampleChroma;
     private const int quantizerIndex = 0;
     private Vector4 patch;
-    public static void Configure(TernaryAvifGpuEntropy entropy, int width, int height, string directory)
+    public static void Configure(AvifGpuEntropy entropy, int width, int height, string directory)
     {
-        var builder = new AvifContainerTemplate { width = width, height = height };
+        var builder = new AvifContainerTemplate { width = width, height = height,
+                                                  subsampleChroma = entropy.subsampleChroma };
         var bytes = new byte[1024 * 3 * 4];
         var sizes = new Vector4();
         for (int i = 0; i < 3; i++)
@@ -52,7 +54,7 @@ public class AvifContainerTemplate
     {
         header = new byte[64];
         headerBits = 0;
-        HeaderBits(0, 3);
+        HeaderBits(subsampleChroma ? 0 : 1, 3);
         HeaderBits(1, 1);
         HeaderBits(1, 1);
         HeaderBits(width * height > 665856 ? 8 : 4, 5);
@@ -62,13 +64,13 @@ public class AvifContainerTemplate
         HeaderBits(height - 1, 16);
         HeaderBits(2, 6);
         HeaderBits(0, 1);
-        HeaderBits(0, 1);
+        if (subsampleChroma) HeaderBits(0, 1);
         HeaderBits(1, 1);
         HeaderBits(1, 8);
         HeaderBits(13, 8);
         HeaderBits(6, 8);
         HeaderBits(1, 1);
-        HeaderBits(0, 2);
+        if (subsampleChroma) HeaderBits(0, 2);
         HeaderBits(0, 1);
         HeaderBits(0, 1);
         HeaderBits(1, 1);
@@ -167,7 +169,7 @@ public class AvifContainerTemplate
         int ftyp = Box("ftyp");
         Text("avif");
         UInt(0, 4);
-        Text("avifmif1miafMA1B");
+        Text(subsampleChroma ? "avifmif1miafMA1B" : "avifmif1miafMA1A");
         End(ftyp);
         int meta = Full("meta", 0), handler = Full("hdlr", 0);
         UInt(0, 4);
@@ -211,8 +213,8 @@ public class AvifContainerTemplate
         End(pixels);
         int config = Box("av1C");
         FByte(0x81);
-        FByte(width * height > 665856 ? 8 : 4);
-        FByte(12);
+        FByte((subsampleChroma ? 0 : 32) | (width * height > 665856 ? 8 : 4));
+        FByte(subsampleChroma ? 12 : 0);
         FByte(0);
         End(config);
         int color = Box("colr");

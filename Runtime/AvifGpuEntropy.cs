@@ -5,14 +5,15 @@ using UnityEngine;
 using VRC.SDKBase;
 using VRC.SDK3.Rendering;
 
-namespace TernaryStars
+namespace VrcImageCodec
 {
 // Owns syntax/CDF/range resources. Only a record count and completed AVIF cross to the CPU.
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
-public class TernaryAvifGpuEntropy : UdonSharpBehaviour
+public class AvifGpuEntropy : UdonSharpBehaviour
 {
     public Material syntaxMaterial, cdfMaterial, rangeMaterial;
     public Texture2D initialCdf, containerHeaders;
+    public bool subsampleChroma = true;
     public int width = 640, height = 360;
     [HideInInspector]
     public Vector4 headerSizes, headerPatch;
@@ -36,9 +37,10 @@ public class TernaryAvifGpuEntropy : UdonSharpBehaviour
         error = "";
         result = null;
         int cols = width / 8, rows = height / 8, blocks = ((cols + 7) / 8) * ((rows + 7) / 8) * 64;
-        prefixA = Surface(prefixA, 1024, (blocks + 1023) / 1024, RenderTextureFormat.RFloat);
-        prefixB = Surface(prefixB, 1024, prefixA.height, RenderTextureFormat.RFloat);
-        countTexture = Surface(countTexture, 1, 1, RenderTextureFormat.ARGB32);
+        prefixA = CodecBuffers.Surface(prefixA, 1024, (blocks + 1023) / 1024, RenderTextureFormat.RFloat);
+        prefixB = CodecBuffers.Surface(prefixB, 1024, prefixA.height, RenderTextureFormat.RFloat);
+        countTexture = CodecBuffers.Surface(countTexture, 1, 1, RenderTextureFormat.ARGB32);
+        syntaxMaterial.SetInt("_Chroma444", subsampleChroma ? 0 : 1);
         syntaxMaterial.SetInt("_Cols", cols);
         syntaxMaterial.SetInt("_Rows", rows);
         syntaxMaterial.SetInt("_Blocks", blocks);
@@ -71,13 +73,13 @@ public class TernaryAvifGpuEntropy : UdonSharpBehaviour
     private void EncodeRecords(int count)
     {
         int rows = (count + 1023) / 1024;
-        events = Surface(events, 1024, rows, RenderTextureFormat.ARGB32);
-        sortedA = Surface(sortedA, 1024, rows, RenderTextureFormat.ARGBFloat);
-        sortedB = Surface(sortedB, 1024, rows, RenderTextureFormat.ARGBFloat);
-        cdfCheckpoints = Surface(cdfCheckpoints, 1024, (((count + 255) / 256) * 4 + 1023) / 1024,
-                                 RenderTextureFormat.ARGBFloat);
-        intervals = Surface(intervals, 1024, rows, RenderTextureFormat.ARGBFloat);
-        resolvedTokens = Surface(resolvedTokens, 1024, rows, RenderTextureFormat.ARGB32);
+        events = CodecBuffers.Surface(events, 1024, rows, RenderTextureFormat.ARGB32);
+        sortedA = CodecBuffers.Surface(sortedA, 1024, rows, RenderTextureFormat.ARGBFloat);
+        sortedB = CodecBuffers.Surface(sortedB, 1024, rows, RenderTextureFormat.ARGBFloat);
+        cdfCheckpoints = CodecBuffers.Surface(cdfCheckpoints, 1024, (((count + 255) / 256) * 4 + 1023) / 1024,
+                                              RenderTextureFormat.ARGBFloat);
+        intervals = CodecBuffers.Surface(intervals, 1024, rows, RenderTextureFormat.ARGBFloat);
+        resolvedTokens = CodecBuffers.Surface(resolvedTokens, 1024, rows, RenderTextureFormat.ARGB32);
         syntaxMaterial.SetInt("_Count", count);
         VRCGraphics.Blit(Texture2D.blackTexture, events, syntaxMaterial, 3);
         cdfMaterial.SetInt("_Count", count);
@@ -99,11 +101,11 @@ public class TernaryAvifGpuEntropy : UdonSharpBehaviour
         VRCGraphics.Blit(Texture2D.blackTexture, cdfCheckpoints, cdfMaterial, 2);
         VRCGraphics.Blit(Texture2D.blackTexture, intervals, cdfMaterial, 3);
         VRCGraphics.Blit(Texture2D.blackTexture, resolvedTokens, cdfMaterial, 4);
-        rangeCheckpoints =
-            Surface(rangeCheckpoints, 2 * ((count + 2047) / 2048 + 1), 1, RenderTextureFormat.ARGBFloat);
-        rangeCount = Surface(rangeCount, 1, 1, RenderTextureFormat.ARGBFloat);
-        rangeDigits = Surface(rangeDigits, 8192, 4, RenderTextureFormat.ARGBFloat);
-        rangeOutput = Surface(rangeOutput, 8192, 4, RenderTextureFormat.ARGB32);
+        rangeCheckpoints = CodecBuffers.Surface(rangeCheckpoints, 2 * ((count + 2047) / 2048 + 1), 1,
+                                                RenderTextureFormat.ARGBFloat);
+        rangeCount = CodecBuffers.Surface(rangeCount, 1, 1, RenderTextureFormat.ARGBFloat);
+        rangeDigits = CodecBuffers.Surface(rangeDigits, 8192, 4, RenderTextureFormat.ARGBFloat);
+        rangeOutput = CodecBuffers.Surface(rangeOutput, 8192, 4, RenderTextureFormat.ARGB32);
         rangeMaterial.SetInt("_TokenCount", count);
         rangeMaterial.SetTexture("_Tokens", resolvedTokens);
         rangeMaterial.SetTexture("_Checkpoints", rangeCheckpoints);
@@ -116,21 +118,6 @@ public class TernaryAvifGpuEntropy : UdonSharpBehaviour
         waitingForCount = false;
         readbackPending = true;
         VRCAsyncGPUReadback.Request(rangeOutput, 0, TextureFormat.RGBA32, this);
-    }
-
-    private RenderTexture Surface(RenderTexture texture, int width, int height, RenderTextureFormat format)
-    {
-        if (texture && texture.width == width && texture.height == height) return texture;
-        if (texture)
-        {
-            texture.Release();
-            Destroy(texture);
-        }
-        texture = new RenderTexture(width, height, 0, format, RenderTextureReadWrite.Linear);
-        texture.filterMode = FilterMode.Point;
-        texture.wrapMode = TextureWrapMode.Clamp;
-        texture.Create();
-        return texture;
     }
 
     public void CancelEncoding()
@@ -183,12 +170,7 @@ public class TernaryAvifGpuEntropy : UdonSharpBehaviour
                                      sortedA,        sortedB,          cdfCheckpoints, intervals,
                                      resolvedTokens, rangeCheckpoints, rangeCount,     rangeDigits,
                                      rangeOutput };
-        for (int i = 0; i < textures.Length; i++)
-            if (textures[i])
-            {
-                textures[i].Release();
-                Destroy(textures[i]);
-            }
+        CodecBuffers.Release(textures);
     }
 }
 }

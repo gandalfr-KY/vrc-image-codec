@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: sudo apt-get update && sudo apt-get install -y mono-devel ffmpeg
-      - run: python -m py_compile Tools~/check-codec.py Tools~/check-jpeg.py
+      - run: python -m py_compile Tools~/check-codec.py Tools~/check-jpeg.py Tools~/check-avif-decoder.py Tools~/check-sampling.py
       - run: python Tools~/check-decoder.py
   shaders:
     runs-on: windows-latest

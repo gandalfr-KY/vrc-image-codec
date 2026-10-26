@@ -1,5 +1,5 @@
 // AV1 fragment kernels with bounded, fixed-prior rate-distortion decisions. Integer DCT routines retain tinyavif/AOM licenses.
-Shader "TernaryStars/Communication/AV1 Intra"
+Shader "VrcImageCodec/AV1 Intra"
 {
  Properties { [HideInInspector] _AomCosts("AV1 rate costs",2D)="black"{} _MainTex("Previous stage",2D)="black"{} }
  SubShader {
@@ -9,25 +9,32 @@ Shader "TernaryStars/Communication/AV1 Intra"
   #include "Av1Transforms.hlsl"
   Texture2D<float4> _MainTex,_ReconTex,_QuantTex,_SourceTex,_ModeTex,_CflTex,_OptimizedTex,_CandidateTex,_UvCandidates,_UvModeTex,_ModeCosts,_Shortlist,_SourceYuvTex;
   float4 _AtlasSize,_PhotoSize,_PackedSize;
+  int _Chroma444;
+  int SampleCount(){return _Chroma444!=0?192:96;}
+  int TileRows(){return _Chroma444!=0?24:12;}
+  int PacketCount(){return _Chroma444!=0?195:99;}
+  int PlaneOffset(int plane){return plane==0?0:plane==1?64:(_Chroma444!=0?128:80);}
+  int HeaderOffset(int plane){return plane==0?0:plane==1?65:(_Chroma444!=0?130:82);}
+  int PlaneSize(int plane){return plane==0||_Chroma444!=0?8:4;}
   int _Diagonal,_QuantDc,_QuantAc,_LinearInput,_FlipSourceY,_ChromaStage;
   // Each logical 8x8 block occupies an adjacent 8x12 tile (Y:64, U:16, V:16).
   int indexAt(float2 uv){
    int2 p=min((int2)(uv*_AtlasSize.xy),(int2)_AtlasSize.xy-1);
-   return ((p.y/12)*(int)_PhotoSize.z+p.x/8)*96+(p.y%12)*8+p.x%8;
+   return ((p.y/TileRows())*(int)_PhotoSize.z+p.x/8)*SampleCount()+(p.y%TileRows())*8+p.x%8;
   }
   float4 atIndex(Texture2D<float4> tex,int index){
-   int block=index/96,local=index%96;
-   return tex.Load(int3((block%(int)_PhotoSize.z)*8+local%8,(block/(int)_PhotoSize.z)*12+local/8,0));
+   int block=index/SampleCount(),local=index%SampleCount();
+   return tex.Load(int3((block%(int)_PhotoSize.z)*8+local%8,(block/(int)_PhotoSize.z)*TileRows()+local/8,0));
   }
   int unpackInt(float4 value){int2 b=(int2)floor(value.rg*255+.5);return b.x+b.y*256-32768;}
   float4 packInt(int value,int pred,int mode){int p=clamp(value,-32768,32767)+32768;return float4(p&255,p>>8,pred,mode)/255.;}
-  int rawAt(int block,int local){return (int)floor(atIndex(_ReconTex,block*96+local).r*255+.5);}
+  int rawAt(int block,int local){return (int)floor(atIndex(_ReconTex,block*SampleCount()+local).r*255+.5);}
   void identify(int index,out int block,out int plane,out int n,out int local,out int2 xy){
-   block=index/96;int slot=index%96;plane=slot<64?0:slot<80?1:2;n=plane==0?8:4;
-   local=slot-(plane==0?0:plane==1?64:80);xy=int2(block%(int)_PhotoSize.z,block/(int)_PhotoSize.z);
+   block=index/SampleCount();int slot=index%SampleCount();plane=slot<64?0:slot<(_Chroma444!=0?128:80)?1:2;n=PlaneSize(plane);
+   local=slot-(PlaneOffset(plane));xy=int2(block%(int)_PhotoSize.z,block/(int)_PhotoSize.z);
   }
   int dcPrediction(int block,int plane,int n,int2 xy){
-   int offset=plane==0?0:plane==1?64:80,sum=0;
+   int offset=PlaneOffset(plane),sum=0;
    [loop]for(int k=0;k<n;k++){
     if(xy.y>0)sum+=rawAt(block-(int)_PhotoSize.z,offset+(n-1)*n+k);
     if(xy.x>0)sum+=rawAt(block-1,offset+k*n+n-1);
@@ -43,8 +50,12 @@ Shader "TernaryStars/Communication/AV1 Intra"
   // Cache the exact integer RGB-to-YUV conversion once per photograph.
   // Full-resolution Y is followed by half-resolution interleaved U/V.
   float4 prepareSourceYuv(v2f_img i):SV_Target{
-   int2 p=min((int2)(i.uv*float2(_PhotoSize.x,_PhotoSize.y*1.5)),int2(_PhotoSize.x-1,_PhotoSize.y*1.5-1));
+   int2 p=min((int2)(i.uv*float2(_PhotoSize.x,_PhotoSize.y*(_Chroma444!=0?2.:1.5))),int2(_PhotoSize.x-1,_PhotoSize.y*(_Chroma444!=0?2.:1.5)-1));
    if(p.y<(int)_PhotoSize.y){int3 rgb=sourcePixel(p);return float4(((19595*rgb.r+38470*rgb.g+7471*rgb.b+32768)>>16)/255.,0,0,1);}
+   if(_Chroma444!=0){int3 rgb=sourcePixel(int2(p.x,p.y-(int)_PhotoSize.y));
+    int u=clamp((-11059*rgb.r-21709*rgb.g+32768*rgb.b+8421376)>>16,0,255);
+    int v=clamp((32768*rgb.r-27439*rgb.g-5329*rgb.b+8421376)>>16,0,255);
+    return float4(u/255.,v/255.,0,1);}
    if(p.x>=(int)_PhotoSize.x/2)return 0;
    int2 pixel=int2(p.x,p.y-(int)_PhotoSize.y)*2;
    int3 sum=sourcePixel(pixel)+sourcePixel(pixel+int2(1,0))+sourcePixel(pixel+int2(0,1))+sourcePixel(pixel+int2(1,1));
@@ -53,7 +64,7 @@ Shader "TernaryStars/Communication/AV1 Intra"
    return float4(u/255.,v/255.,0,1);
   }
   int sourceValue(int2 block,int plane,int row,int col){
-   int2 p=block*(plane==0?8:4)+int2(col,row);
+   int2 p=block*PlaneSize(plane)+int2(col,row);
    if(plane!=0)p.y+=(int)_PhotoSize.y;
    float4 value=_SourceYuvTex.Load(int3(p,0));
    return (int)floor((plane==2?value.g:value.r)*255+.5);
@@ -220,6 +231,9 @@ float4 selectChroma(v2f_img i):SV_Target{
    int alpha=0,average=0;int uvMode=plane==0?0:(int)round(_UvModeTex.Load(int3(xy,0)).b*255);
    if(plane!=0){float4 alphas=_CflTex.Load(int3(xy,0));alpha=(int)floor((plane==1?alphas.r:alphas.g)*255+.5)-16;average=lumaAverage(block);}
    if(plane==0){float4 values=_OptimizedTex.Load(int3(xy.x*16+local/4,xy.y,0));return packInt((int)round(values[local%4]),predictor(block,8,0,mode,local/8,local%8,dc),local==1?(mode>>4):(mode&15)+16*(int)round(_ModeTex.Load(int3(xy,0)).b*255));}
+   if(plane!=0&&_Chroma444!=0){
+    float4 values=_OptimizedTex.Load(int3(xy.x*32+(plane-1)*16+local/4,xy.y,0));
+    return packInt((int)round(values[local%4]),dc,64);}
    if(plane!=0){
     float4 values=_OptimizedTex.Load(int3(xy.x*16+(plane-1)*4+local/4,xy.y,0));
     return packInt((int)round(values[local%4]),uvPredict(block,xy,plane,uvMode,local/4,local%4,dc,alpha,average),uvMode==13?alpha+16:64+uvMode);
@@ -232,10 +246,10 @@ float4 selectChroma(v2f_img i):SV_Target{
    int txType=plane==0?(int)round(_ModeTex.Load(int3(xy,0)).b*255):uvType((int)round(_UvModeTex.Load(int3(xy,0)).b*255));
    int row=local/n,col=local%n,v[8];
    [loop]for(int r=0;r<n;r++){
-    int k=r*n+col;int texel=plane==0?k/4:(plane-1)*4+k/4;
-    v[r]=(int)round(_OptimizedTex.Load(int3(xy.x*16+texel,xy.y,0))[k%4]);
+    int k=r*n+col;int texel=plane==0?k/4:(plane-1)*(_Chroma444!=0?16:4)+k/4;
+    v[r]=(int)round(_OptimizedTex.Load(int3(xy.x*(_Chroma444!=0&&plane!=0?32:16)+texel,xy.y,0))[k%4]);
    }
-   if(n==8){if(txType==4){[unroll]for(int z=0;z<8;z++)v[z]*=2;}else if(txType==1||txType==3)inv_adst8(v,12,14);else inv_dct8(v,12,14);}else {if(txType==1||txType==3)inv_adst4(v,12,14);else inv_dct4(v,12,14);}
+   if(n==8){if(txType==4){[unroll]for(int z=0;z<8;z++)v[z]*=2;}else if(txType==1||txType==3)inv_adst8(v,12,16);else inv_dct8(v,12,16);}else {if(txType==1||txType==3)inv_adst4(v,12,16);else inv_dct4(v,12,16);}
    int pred=(int)floor(atIndex(_QuantTex,index).b*255+.5);
    return float4(clamp(pred+((v[row]+8)>>4),0,255)/255.,0,0,1);
   }
@@ -249,14 +263,14 @@ float4 selectChroma(v2f_img i):SV_Target{
   float4 packContexts(v2f_img i):SV_Target
   {
    int2 p=min((int2)(i.uv*_PackedSize.xy),(int2)_PackedSize.xy-1);
-   int index=p.y*(int)_PackedSize.x+p.x,block=index/99,slot=index%99;
+   int index=p.y*(int)_PackedSize.x+p.x,block=index/PacketCount(),slot=index%PacketCount();
    if(block>=(int)(_PhotoSize.z*_PhotoSize.w))return 0;
-   int plane=slot<65?0:slot<82?1:2,local=slot-(plane==0?0:plane==1?65:82);
-   int n=plane==0?8:4,count=n*n,offset=block*96+(plane==0?0:plane==1?64:80);
+   int plane=slot<65?0:slot<(_Chroma444!=0?130:82)?1:2,local=slot-(HeaderOffset(plane));
+   int n=PlaneSize(plane),count=n*n,offset=block*SampleCount()+(PlaneOffset(plane));
    if(local==0)
    {
     int eob=0,level=0;
-    [loop]for(int k=0;k<count;k++){int c=coefficient(offset+(plane==0?scan8[k]:scan4[k]));level+=abs(c);if(c!=0)eob=k+1;}
+    [loop]for(int k=0;k<count;k++){int c=coefficient(offset+(plane==0||_Chroma444!=0?scan8[k]:scan4[k]));level+=abs(c);if(c!=0)eob=k+1;}
     int meta=(int)round(atIndex(_QuantTex,offset).a*255);
     return float4(eob,min(level,63),plane==0?((int)floor(atIndex(_QuantTex,offset).a*255+.5)&15):(meta>=64?16:meta),plane==0?((int)floor(atIndex(_QuantTex,offset).a*255+.5)>>4)+8*(int)round(atIndex(_QuantTex,offset+1).a*255):(meta>=64?meta-64:13))/255.;
    }
@@ -291,8 +305,8 @@ static const int Rate_angleDeltaDefault[56]={2002,1803,1890,567,1515,1712,1886,1
 int ModeGroup(int mode){return mode==1||mode==10?1:mode==2||mode==11?2:mode==3||mode==8?3:mode>=4&&mode<=7?4:0;}
 int PredictionRate(int code,int2 xy){
  int block=xy.y*(int)_PhotoSize.z+xy.x;
- int above=xy.y>0?((int)round(atIndex(_QuantTex,(block-(int)_PhotoSize.z)*96).a*255)&15):0;
- int left=xy.x>0?((int)round(atIndex(_QuantTex,(block-1)*96).a*255)&15):0;
+ int above=xy.y>0?((int)round(atIndex(_QuantTex,(block-(int)_PhotoSize.z)*SampleCount()).a*255)&15):0;
+ int left=xy.x>0?((int)round(atIndex(_QuantTex,(block-1)*SampleCount()).a*255)&15):0;
  int mode=code&15,cost=Rate_intraYDefault[(ModeGroup(above)*5+ModeGroup(left))*13+mode];
  if(mode>=1&&mode<=8)cost+=Rate_angleDeltaDefault[(mode-1)*7+(code>>4)];
  return cost;
@@ -322,10 +336,11 @@ int cdefPixel(int2 p){
  int block=(p.y/8)*(int)_PhotoSize.z+p.x/8;return rawAt(block,(p.y%8)*8+p.x%8);
 }
 bool omittedBlock(int block){
- [loop]for(int k=0;k<96;k++)if(coefficient(block*96+k)!=0)return false;return true;
+ [loop]for(int k=0;k<SampleCount();k++)if(coefficient(block*SampleCount()+k)!=0)return false;return true;
 }
 float4 cdefDirection(v2f_img input):SV_Target{
  int2 xy=min((int2)(input.uv*_PhotoSize.zw),(int2)_PhotoSize.zw-1);int block=xy.y*(int)_PhotoSize.z+xy.x;
+ if(omittedBlock(block))return float4(0,0,0,1);
  int partial[120],cost[8];[loop]for(int k=0;k<120;k++)partial[k]=0;[unroll]for(int k=0;k<8;k++)cost[k]=0;
  static const int divisor[9]={0,840,420,280,210,168,140,120,105};
  [loop]for(int r=0;r<8;r++){[loop]for(int c=0;c<8;c++){
@@ -347,7 +362,7 @@ float4 cdefDirection(v2f_img input):SV_Target{
  int best=0;[unroll]for(int d=1;d<8;d++)if(cost[d]>cost[best])best=d;
  int variance=(cost[best]-cost[(best+4)&7])>>10;
  int strength=variance==0?0:(6*(4+(variance>>6?min(firstbithigh(variance>>6),12):0))+8)>>4;
- return float4(best,strength,0,255)/255.;
+ return float4(best,strength,1,255)/255.;
 }
 static const int2 cdefOffsets[16]={int2(1,-1),int2(2,-2),int2(1,0),int2(2,-1),int2(1,0),int2(2,0),int2(1,0),int2(2,1),int2(1,1),int2(2,2),int2(0,1),int2(1,2),int2(0,1),int2(0,2),int2(0,1),int2(-1,2)};
 int cdefConstrain(int difference,int strength){
@@ -355,7 +370,7 @@ int cdefConstrain(int difference,int strength){
 }
 float4 cdefFilter(v2f_img input):SV_Target{
  int index=indexAt(input.uv),block,plane,n,local;int2 xy;identify(index,block,plane,n,local,xy);
- if(plane!=0||xy.y>=(int)_PhotoSize.w||omittedBlock(block))return atIndex(_MainTex,index);
+ if(plane!=0||xy.y>=(int)_PhotoSize.w||_ModeTex.Load(int3(xy,0)).b==0)return atIndex(_MainTex,index);
  int2 pixel=xy*8+int2(local%8,local/8),params=(int2)round(_ModeTex.Load(int3(xy,0)).rg*255);
  int dir=params.x,strength=params.y,x=cdefPixel(pixel),sum=0,lo=x,hi=x;
  [unroll]for(int k=0;k<2;k++){
@@ -397,7 +412,24 @@ float4 cdefFilter(v2f_img input):SV_Target{
    o.uv.x=x;o.pos.x=(2*x-1)*o.pos.w;return o;
   }
   // Four optimized chroma coefficients per fragment; shared by quantization.
+  void transformChroma444(int block,int2 xy,int plane,out int t[64]){
+   int dc=dcPrediction(block,plane,8,xy),v[8];
+   [loop]for(int c=0;c<8;c++){
+    [loop]for(int r=0;r<8;r++)v[r]=(sourceValue(xy,plane,r,c)-dc)*4;
+    fwd_dct8(v,13,0);[loop]for(int r=0;r<8;r++)t[r*8+c]=(v[r]+1)>>1;
+   }
+   [loop]for(int r=0;r<8;r++){
+    [loop]for(int c=0;c<8;c++)v[c]=t[r*8+c];
+    fwd_dct8(v,13,0);[loop]for(int c=0;c<8;c++)t[r*8+c]=QuantAt(v[c],plane,r*8+c);
+   }
+  }
   float4 optimizedChroma(v2f_img i):SV_Target{
+   if(_Chroma444!=0){
+    int2 p=min((int2)(i.uv*float2(_PhotoSize.z*32,_PhotoSize.w)),int2(_PhotoSize.z*32-1,_PhotoSize.w-1));
+    int2 xy=int2(p.x/32,p.y);if(xy.x+2*xy.y!=_Diagonal)return 0;
+    int plane=1+(p.x%32)/16,t[64];transformChroma444(xy.y*(int)_PhotoSize.z+xy.x,xy,plane,t);
+    int at=(p.x%16)*4;return float4(t[at],t[at+1],t[at+2],t[at+3]);
+   }
    int2 p=min((int2)(i.uv*float2(_PhotoSize.z*16,_PhotoSize.w)),int2(_PhotoSize.z*16-1,_PhotoSize.w-1));
    int2 xy=int2(p.x/16,p.y);int slot=p.x%16;
    if(xy.x+2*xy.y!=_Diagonal||slot>=8)return 0;
@@ -407,21 +439,24 @@ float4 cdefFilter(v2f_img input):SV_Target{
    int t[16],q[16];uvTransform(block,xy,plane,mode,alpha,lumaAverage(block),t);OptimizeUv(t,plane,q);
    int at=(slot%4)*4;return float4(q[at],q[at+1],q[at+2],q[at+3]);
   }
+  // AV1 8-bit inverse transforms clip intermediate values to signed 16 bits.
+  // Smaller stage bounds incorrectly saturate valid high-quantizer input.
   // Save the first inverse-transform dimension, including original rounding.
   // The existing optimized-coefficient buffer is no longer needed at this stage.
   float4 inverseRows(v2f_img i):SV_Target{
-   int2 p=min((int2)(i.uv*float2(_PhotoSize.z*16,_PhotoSize.w)),int2(_PhotoSize.z*16-1,_PhotoSize.w-1));
-   int2 xy=int2(p.x/16,p.y);if(xy.x+2*xy.y!=_Diagonal)return 0;
-   int slot=p.x%16,plane=_ChromaStage==0?0:1+slot/4;
-   if(_ChromaStage!=0&&slot>=8)return 0;
-   int n=plane==0?8:4,local=(plane==0?slot:slot%4)*4,row=local/n;
+   int span=_Chroma444!=0&&_ChromaStage!=0?32:16,perPlane=_Chroma444!=0?16:4;
+   int2 p=min((int2)(i.uv*float2(_PhotoSize.z*span,_PhotoSize.w)),int2(_PhotoSize.z*span-1,_PhotoSize.w-1));
+   int2 xy=int2(p.x/span,p.y);if(xy.x+2*xy.y!=_Diagonal)return 0;
+   int slot=p.x%span,plane=_ChromaStage==0?0:1+slot/perPlane;
+   if(_ChromaStage!=0&&slot>=perPlane*2)return 0;
+   int n=PlaneSize(plane),local=(plane==0?slot:slot%perPlane)*4,row=local/n;
    int tx=plane==0?(int)round(_ModeTex.Load(int3(xy,0)).b*255):uvType((int)round(_UvModeTex.Load(int3(xy,0)).b*255));
-   int block=xy.y*(int)_PhotoSize.z+xy.x,offset=block*96+(plane==0?0:plane==1?64:80),v[8];
+   int block=xy.y*(int)_PhotoSize.z+xy.x,offset=block*SampleCount()+(PlaneOffset(plane)),v[8];
    [loop]for(int c=0;c<n;c++){
     int k=row*n+c;v[c]=clamp(unpackInt(atIndex(_QuantTex,offset+k))*(plane==0?LumaStep(k,tx):StepAt(plane,k)),-32768,32767);
    }
-   if(n==8){if(tx==4){[unroll]for(int z=0;z<8;z++)v[z]*=2;}else if(tx==2||tx==3)inv_adst8(v,12,15);else inv_dct8(v,12,15);}
-   else {if(tx==2||tx==3)inv_adst4(v,12,14);else inv_dct4(v,12,14);}
+   if(n==8){if(tx==4){[unroll]for(int z=0;z<8;z++)v[z]*=2;}else if(tx==2||tx==3)inv_adst8(v,12,16);else inv_dct8(v,12,16);}
+   else {if(tx==2||tx==3)inv_adst4(v,12,16);else inv_dct4(v,12,16);}
    int at=local%n;float4 values=float4(v[at],v[at+1],v[at+2],v[at+3]);
    if(n==8)values=floor((values+1)/2);return clamp(values,-32768,32767);
   }
@@ -439,20 +474,21 @@ float4 cdefFilter(v2f_img input):SV_Target{
   float4 decodedModes(v2f_img i):SV_Target{
    int2 p=min((int2)(i.uv*_PhotoSize.zw),(int2)_PhotoSize.zw-1);
    int block=p.y*(int)_PhotoSize.z+p.x;
-   int4 y=(int4)round(decodedAt(block*99)*255.);
-   int4 u=(int4)round(decodedAt(block*99+65)*255.);
-   int4 v=(int4)round(decodedAt(block*99+82)*255.);
+   int4 y=(int4)round(decodedAt(block*PacketCount())*255.);
+   int4 u=(int4)round(decodedAt(block*PacketCount()+HeaderOffset(1))*255.);
+   int4 v=(int4)round(decodedAt(block*PacketCount()+HeaderOffset(2))*255.);
    if(_DecodeChroma!=0)return float4(u.z,v.z,u.w,255)/255.;
    return float4(y.z,y.w>>3,y.w&7,255)/255.;
   }
   float4 decodedQuant(v2f_img i):SV_Target{
    int index=indexAt(i.uv),block,plane,n,local;int2 xy;identify(index,block,plane,n,local,xy);
    if(xy.y>=(int)_PhotoSize.w||xy.x+2*xy.y!=_Diagonal||(_ChromaStage==0?plane!=0:plane==0))discard;
-   int planeOffset=plane==0?0:plane==1?65:82;
-   int2 bytes=(int2)round(decodedAt(block*99+planeOffset+1+local).rg*255.);
+   int planeOffset=HeaderOffset(plane);
+   int2 bytes=(int2)round(decodedAt(block*PacketCount()+planeOffset+1+local).rg*255.);
    int coefficient=((bytes.x+(bytes.y<<8))<<16)>>16;
    int dc=dcPrediction(block,plane,n,xy),pred;
    if(plane==0){int2 code=(int2)round(_ModeTex.Load(int3(xy,0)).rg*255.);pred=predictor(block,8,0,code.x+(code.y<<4),local/8,local%8,dc);}
+   else if(_Chroma444!=0)pred=dc;
    else{int uv=(int)round(_UvModeTex.Load(int3(xy,0)).b*255.);int alpha=(int)round(_CflTex.Load(int3(xy,0))[plane-1]*255.)-16;pred=uvPredict(block,xy,plane,uv,local/4,local%4,dc,alpha,lumaAverage(block));}
    return packInt(coefficient,pred,0);
   }
@@ -460,8 +496,9 @@ float4 cdefFilter(v2f_img input):SV_Target{
    int2 pixel=min((int2)(i.uv*_PhotoSize.xy),(int2)_PhotoSize.xy-1);
    int block=(pixel.y/8)*(int)_PhotoSize.z+pixel.x/8;
    float y=rawAt(block,(pixel.y%8)*8+pixel.x%8)/255.;
-   float u=(rawAt(block,64+((pixel.y%8)/2)*4+(pixel.x%8)/2)-128)/255.;
-   float v=(rawAt(block,80+((pixel.y%8)/2)*4+(pixel.x%8)/2)-128)/255.;
+   int cp=_Chroma444!=0?(pixel.y%8)*8+pixel.x%8:((pixel.y%8)/2)*4+(pixel.x%8)/2;
+   float u=(rawAt(block,PlaneOffset(1)+cp)-128)/255.;
+   float v=(rawAt(block,PlaneOffset(2)+cp)-128)/255.;
    float3 rgb=saturate(float3(y+1.402*v,y-.344136*u-.714136*v,y+1.772*u));
    #ifndef UNITY_COLORSPACE_GAMMA
     rgb=GammaToLinearSpace(rgb);

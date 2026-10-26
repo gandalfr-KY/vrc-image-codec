@@ -6,7 +6,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 using UdonSharp;
 using UdonSharpEditor;
-using TernaryStars;
+using VrcImageCodec;
 
 namespace VrcAvif.Encoder.Editor
 {
@@ -23,16 +23,17 @@ public static class AvifEncoderSetup
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
             throw new InvalidOperationException("Create the decoder outside Play mode.");
-        EnsurePrograms(typeof(TernaryAvifDecoder));
+        EnsurePrograms(typeof(AvifDecoder));
         var root = new GameObject("AVIF decoder");
         Undo.RegisterCreatedObjectUndo(root, "Create AVIF decoder");
-        var decoder = root.AddUdonSharpComponent<TernaryAvifDecoder>();
+        var decoder = root.AddUdonSharpComponent<AvifDecoder>();
         const string directory = "Assets/AvifEncoderGenerated";
         Directory.CreateDirectory(directory);
         AssetDatabase.Refresh();
-        decoder.material = new Material(Shader.Find("TernaryStars/Communication/AV1 Intra"));
+        decoder.material = new Material(Shader.Find("VrcImageCodec/AV1 Intra"));
         AssetDatabase.CreateAsset(decoder.material,
                                   AssetDatabase.GenerateUniqueAssetPath(directory + "/Decoder.mat"));
+        ConfigureGpuDecoder(decoder);
         UdonSharpEditorUtility.CopyProxyToUdon(decoder);
         EditorUtility.SetDirty(decoder);
         AssetDatabase.SaveAssets();
@@ -47,17 +48,16 @@ public static class AvifEncoderSetup
         EnsurePrograms();
         var root = new GameObject("AVIF encoder");
         Undo.RegisterCreatedObjectUndo(root, "Create AVIF encoder");
-        var encoder = root.AddUdonSharpComponent<TernaryAvifEncoder>();
-        encoder.gpuTransform = root.AddUdonSharpComponent<TernaryAvifGpuTransform>();
-        Configure(encoder, 640, 360, TernaryAvifEncoder.DefaultQuality);
+        var encoder = root.AddUdonSharpComponent<AvifEncoder>();
+        encoder.gpuTransform = root.AddUdonSharpComponent<AvifGpuTransform>();
+        Configure(encoder, 640, 360, AvifEncoder.DefaultQuality);
         Selection.activeGameObject = root;
     }
     public static bool ValidDimensions(int w, int h)
     {
         return w >= 16 && h >= 16 && w <= 1920 && h <= 1920 && w % 8 == 0 && h % 8 == 0 && w * h <= 2073600;
     }
-    public static void Configure(TernaryAvifDecoder decoder,
-                                 AvifProcessingLoad load = AvifProcessingLoad.Normal)
+    public static void Configure(AvifDecoder decoder, AvifProcessingLoad load = AvifProcessingLoad.Normal)
     {
         if (!decoder) throw new ArgumentException("Select an AVIF decoder.");
         if (load < AvifProcessingLoad.Gentle || load > AvifProcessingLoad.Fast)
@@ -71,12 +71,14 @@ public static class AvifEncoderSetup
         decoder.diagonalsPerFrame = load == AvifProcessingLoad.Gentle ? 4
                                     : load == AvifProcessingLoad.Fast ? 16
                                                                       : 8;
+        ConfigureGpuDecoder(decoder);
         UdonSharpEditorUtility.CopyProxyToUdon(decoder);
         EditorUtility.SetDirty(decoder);
         EditorSceneManager.MarkSceneDirty(decoder.gameObject.scene);
     }
-    public static void Configure(TernaryAvifEncoder encoder, int w, int h, int q,
-                                 AvifProcessingLoad load = AvifProcessingLoad.Normal)
+    public static void Configure(AvifEncoder encoder, int w, int h, int q,
+                                 AvifProcessingLoad load = AvifProcessingLoad.Normal,
+                                 bool subsampleChroma = true)
     {
         if (!encoder) throw new ArgumentException("Select an AVIF encoder.");
         if (!ValidDimensions(w, h) || q < 0 || q > 100)
@@ -89,6 +91,8 @@ public static class AvifEncoderSetup
         if (!gpu) throw new InvalidOperationException("A GPU transform is required.");
         Undo.RecordObject(encoder, "Configure AVIF");
         Undo.RecordObject(gpu, "Configure AVIF");
+        encoder.subsampleChroma = subsampleChroma;
+        gpu.subsampleChroma = subsampleChroma;
         encoder.width = w;
         encoder.height = h;
         encoder.quality = q;
@@ -102,7 +106,7 @@ public static class AvifEncoderSetup
             "Assets/AvifEncoderGenerated/" + encoder.GetInstanceID().ToString().Replace("-", "n");
         Directory.CreateDirectory(directory);
         AssetDatabase.Refresh();
-        var shader = Shader.Find("TernaryStars/Communication/AV1 Intra");
+        var shader = Shader.Find("VrcImageCodec/AV1 Intra");
         if (!shader) throw new InvalidOperationException("AV1 Intra shader is missing.");
         if (!gpu.material)
         {
@@ -126,20 +130,27 @@ public static class AvifEncoderSetup
             Texture(directory, "Prediction shortlist", columns * 2, rows, false, gpu.shortlist, true);
         gpu.modeTexture = Texture(directory, "Prediction modes", w / 8, h / 8, false, gpu.modeTexture);
         gpu.cflTexture = Texture(directory, "Chroma prediction", w / 8, h / 8, false, gpu.cflTexture);
-        gpu.quantA = Texture(directory, "Quant A", w, h / 8 * 12, false, gpu.quantA);
-        gpu.reconA = Texture(directory, "Reconstruction A", w, h / 8 * 12, false, gpu.reconA);
-        gpu.reconB = Texture(directory, "Reconstruction B", w, h / 8 * 12, false, gpu.reconB);
-        gpu.packedTexture = Texture(directory, "Coefficients", 512, (w / 8 * (h / 8) * 99 + 511) / 512, false,
-                                    gpu.packedTexture);
+        if (!subsampleChroma)
+            gpu.chromaTexture =
+                Texture(directory, "Chroma 444 scratch", columns * 32, rows, false, gpu.chromaTexture, true);
+        gpu.quantA = Texture(directory, "Quant A", w, h / 8 * (subsampleChroma ? 12 : 24), false, gpu.quantA);
+        gpu.reconA =
+            Texture(directory, "Reconstruction A", w, h / 8 * (subsampleChroma ? 12 : 24), false, gpu.reconA);
+        gpu.reconB =
+            Texture(directory, "Reconstruction B", w, h / 8 * (subsampleChroma ? 12 : 24), false, gpu.reconB);
+        gpu.packedTexture =
+            Texture(directory, "Coefficients", 512,
+                    (w / 8 * (h / 8) * (subsampleChroma ? 99 : 195) + 511) / 512, false, gpu.packedTexture);
         gpu.inputTexture = Texture(directory, "Capture", w, h, true, gpu.inputTexture);
-        gpu.sourceYuvTexture =
-            Texture(directory, "Cached source YUV", w, h * 3 / 2, false, gpu.sourceYuvTexture);
+        gpu.sourceYuvTexture = Texture(directory, "Cached source YUV", w, h * (subsampleChroma ? 3 : 4) / 2,
+                                       false, gpu.sourceYuvTexture);
         if (!encoder.gpuEntropy)
         {
-            encoder.gpuEntropy = encoder.GetComponent<TernaryAvifGpuEntropy>();
+            encoder.gpuEntropy = encoder.GetComponent<AvifGpuEntropy>();
             if (!encoder.gpuEntropy)
-                encoder.gpuEntropy = encoder.gameObject.AddUdonSharpComponent<TernaryAvifGpuEntropy>();
+                encoder.gpuEntropy = encoder.gameObject.AddUdonSharpComponent<AvifGpuEntropy>();
         }
+        encoder.gpuEntropy.subsampleChroma = subsampleChroma;
         ConfigureEntropy(encoder.gpuEntropy, w, h, directory);
         UdonSharpEditorUtility.CopyProxyToUdon(encoder.gpuEntropy);
         UdonSharpEditorUtility.CopyProxyToUdon(encoder);
@@ -154,7 +165,7 @@ public static class AvifEncoderSetup
     {
         public int[] costs, eobCosts;
     }
-    static void ConfigureEntropy(TernaryAvifGpuEntropy entropy, int width, int height, string directory)
+    static void ConfigureEntropy(AvifGpuEntropy entropy, int width, int height, string directory)
     {
         entropy.width = width;
         entropy.height = height;
@@ -164,39 +175,50 @@ public static class AvifEncoderSetup
             EntropyMaterial(entropy.cdfMaterial, "VrcAvif/Adaptive CDF", directory + "/CDF.mat");
         entropy.rangeMaterial =
             EntropyMaterial(entropy.rangeMaterial, "VrcAvif/Range coding", directory + "/Range.mat");
-        if (!entropy.initialCdf)
-        {
-            var pixels = new Color[16384];
-            pixels[0] = new Color(19132, 32767, 32767, 0);
-            CdfFamily(pixels, AvifTables.CreatePartition16Default(), 3, 9);
-            CdfFamily(pixels, AvifTables.CreatePartition32Default(), 39, 9);
-            CdfFamily(pixels, AvifTables.CreatePartition64Default(), 75, 9);
-            CdfFamily(pixels, AvifTables.CreateTxTypeDefault(), 112, 4);
-            CdfFamily(pixels, AvifTables.CreateEob64Default(), 268, 6);
-            CdfFamily(pixels, AvifTables.CreateEob16Default(), 316, 4);
-            CdfFamily(pixels, AvifTables.CreateIntraYDefault(), 3300, 12);
-            CdfFamily(pixels, AvifTables.CreateIntraUvDefault(), 2928, 13);
-            CdfFamily(pixels, AvifTables.CreateAngleDeltaDefault(), 3210, 6);
-            CdfFamily(pixels, AvifTables.CreateCflSignDefault(), 3109, 7);
-            CdfFamily(pixels, AvifTables.CreateCflAlphaDefault(), 3116, 15);
-            SmallCdfFamily(pixels, AvifTables.CreateSkipDefault(), 3900);
-            SmallCdfFamily(pixels, AvifTables.CreateAllZeroDefault(), 164);
-            SmallCdfFamily(pixels, AvifTables.CreateEobExtra8Default(), 348);
-            SmallCdfFamily(pixels, AvifTables.CreateEobExtra4Default(), 388);
-            SmallCdfFamily(pixels, AvifTables.CreateCoeffBaseEobDefault(), 412);
-            SmallCdfFamily(pixels, AvifTables.CreateCoeffBaseDefault(), 540);
-            SmallCdfFamily(pixels, AvifTables.CreateCoeffBrDefault(), 1788);
-            SmallCdfFamily(pixels, AvifTables.CreateDcSignDefault(), 2796);
-            entropy.initialCdf = new Texture2D(1024, 16, TextureFormat.RGBAFloat, false, true);
-            entropy.initialCdf.name = "AV1 initial probabilities";
-            entropy.initialCdf.filterMode = FilterMode.Point;
-            entropy.initialCdf.SetPixels(pixels);
-            entropy.initialCdf.Apply(false, false);
-            AssetDatabase.CreateAsset(entropy.initialCdf,
-                                      AssetDatabase.GenerateUniqueAssetPath(directory + "/CDF.asset"));
-        }
+        if (!entropy.initialCdf) entropy.initialCdf = InitialCdf(directory);
         AvifContainerTemplate.Configure(entropy, width, height, directory);
         EditorUtility.SetDirty(entropy);
+    }
+    static Texture2D InitialCdf(string directory)
+    {
+        var pixels = new Color[16384];
+        pixels[0] = new Color(19132, 32767, 32767, 0);
+        CdfFamily(pixels, AvifTables.CreatePartition16Default(), 3, 9);
+        CdfFamily(pixels, AvifTables.CreatePartition32Default(), 39, 9);
+        CdfFamily(pixels, AvifTables.CreatePartition64Default(), 75, 9);
+        CdfFamily(pixels, AvifTables.CreateTxTypeDefault(), 112, 4);
+        CdfFamily(pixels, AvifTables.CreateEob64Default(), 268, 6);
+        CdfFamily(pixels, AvifTables.CreateEob16Default(), 316, 4);
+        CdfFamily(pixels, AvifTables.CreateIntraYDefault(), 3300, 12);
+        CdfFamily(pixels, AvifTables.CreateIntraUvDefault(), 2928, 13);
+        CdfFamily(pixels, AvifTables.CreateAngleDeltaDefault(), 3210, 6);
+        CdfFamily(pixels, AvifTables.CreateCflSignDefault(), 3109, 7);
+        CdfFamily(pixels, AvifTables.CreateCflAlphaDefault(), 3116, 15);
+        SmallCdfFamily(pixels, AvifTables.CreateSkipDefault(), 3900);
+        SmallCdfFamily(pixels, AvifTables.CreateAllZeroDefault(), 164);
+        SmallCdfFamily(pixels, AvifTables.CreateEobExtra8Default(), 348);
+        SmallCdfFamily(pixels, AvifTables.CreateEobExtra4Default(), 388);
+        SmallCdfFamily(pixels, AvifTables.CreateCoeffBaseEobDefault(), 412);
+        SmallCdfFamily(pixels, AvifTables.CreateCoeffBaseDefault(), 540);
+        SmallCdfFamily(pixels, AvifTables.CreateCoeffBrDefault(), 1788);
+        SmallCdfFamily(pixels, AvifTables.CreateDcSignDefault(), 2796);
+        var texture = new Texture2D(1024, 16, TextureFormat.RGBAFloat, false, true);
+        texture.name = "AV1 initial probabilities";
+        texture.filterMode = FilterMode.Point;
+        texture.SetPixels(pixels);
+        texture.Apply(false, false);
+        AssetDatabase.CreateAsset(texture, AssetDatabase.GenerateUniqueAssetPath(directory + "/CDF.asset"));
+        return texture;
+    }
+    static void ConfigureGpuDecoder(AvifDecoder decoder)
+    {
+        const string directory = "Assets/AvifEncoderGenerated";
+        Directory.CreateDirectory(directory);
+        AssetDatabase.Refresh();
+        if (!decoder.entropyMaterial)
+            decoder.entropyMaterial =
+                EntropyMaterial(null, "VrcImageCodec/AV1 Decode", directory + "/Decode entropy.mat");
+        if (!decoder.initialCdf) decoder.initialCdf = InitialCdf(directory);
     }
     static Material EntropyMaterial(Material material, string name, string path)
     {
@@ -293,8 +315,7 @@ public static class AvifEncoderSetup
             if (orphan && !orphan.sourceCsScript) UdonSharpEditorUtility.DeleteProgramAsset(orphan);
         }
         if (types.Length == 0)
-            types = new[] { typeof(TernaryAvifEncoder), typeof(TernaryAvifGpuTransform),
-                            typeof(TernaryAvifGpuEntropy) };
+            types = new[] { typeof(AvifEncoder), typeof(AvifGpuTransform), typeof(AvifGpuEntropy) };
         foreach (var type in types)
         {
             var asset = UdonSharpEditorUtility.GetUdonSharpProgramAsset(type);

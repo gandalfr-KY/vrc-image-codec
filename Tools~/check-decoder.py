@@ -1,4 +1,4 @@
-"""Check production CPU decoding; only GPU reconstruction is replaced in this native harness."""
+"""Check the independent CPU reference against recorded coefficients; production GPU decoding is tested in ClientSim."""
 from pathlib import Path
 import os
 import subprocess
@@ -23,10 +23,7 @@ def compare(actual, expected, width, height):
 
 with tempfile.TemporaryDirectory(prefix="avif-decoder-") as directory:
     temp = Path(directory)
-    source = (ROOT / "Runtime/TernaryAvifDecoder.cs").read_text(encoding="utf-8")
-    start = source.index("    private RenderTexture Surface(")
-    end = source.index("    private int[] intraYDefault", start)
-    source = source[:start] + "    private void BeginReconstruction(){busy=false;complete=true;}\n    private void Reconstruct(){}\n" + source[end:]
+    source = (ROOT / "Tests~/Reference/AvifDecoderCpu.cs").read_text(encoding="utf-8")
     (temp / "DecoderCpu.cs").write_text(source, encoding="utf-8")
     exe = temp / "decoder.exe"
     subprocess.run(([MONO, CSC] if CSC.endswith(".exe") else [CSC]) + ["/nologo", "/main:DecoderTest", "/out:" + str(exe),

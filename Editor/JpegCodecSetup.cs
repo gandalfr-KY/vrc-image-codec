@@ -4,7 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 using UdonSharpEditor;
-using TernaryStars;
+using VrcImageCodec;
 
 namespace VrcAvif.Encoder.Editor
 {
@@ -13,14 +13,14 @@ public static class JpegCodecSetup
     [MenuItem("Tools/AVIF Encoder/Create JPEG codec")]
     public static void Create()
     {
-        AvifEncoderSetup.EnsurePrograms(typeof(TernaryJpegEncoder), typeof(TernaryJpegDecoder));
+        AvifEncoderSetup.EnsurePrograms(typeof(JpegEncoder), typeof(JpegDecoder));
         var root = new GameObject("JPEG codec");
         Undo.RegisterCreatedObjectUndo(root, "Create JPEG codec");
-        Configure(root.AddUdonSharpComponent<TernaryJpegEncoder>());
-        Configure(root.AddUdonSharpComponent<TernaryJpegDecoder>());
+        Configure(root.AddUdonSharpComponent<JpegEncoder>());
+        Configure(root.AddUdonSharpComponent<JpegDecoder>());
         Selection.activeGameObject = root;
     }
-    public static void Configure(TernaryJpegEncoder encoder)
+    public static void Configure(JpegEncoder encoder)
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
             throw new InvalidOperationException("Configure outside Play mode.");
@@ -30,7 +30,7 @@ public static class JpegCodecSetup
         EditorUtility.SetDirty(encoder);
         AssetDatabase.SaveAssets();
     }
-    public static void Configure(TernaryJpegDecoder decoder)
+    public static void Configure(JpegDecoder decoder)
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
             throw new InvalidOperationException("Configure outside Play mode.");
