@@ -14,7 +14,8 @@ public class ImageEncoderInspector : UnityEditor.Editor
 
     public override void OnInspectorGUI()
     {
-        if (UdonSharpGUI.DrawDefaultUdonSharpBehaviourHeader(target, false, false)) return;
+        if (UdonSharpGUI.DrawProgramSource(target, false)) return;
+        UdonSharpGUI.DrawCompileErrorTextArea();
         var encoder = (ImageEncoder)target;
         serializedObject.Update();
         string resolutionError;
@@ -38,6 +39,7 @@ public class ImageEncoderInspector : UnityEditor.Editor
             EditorGUILayout.HelpBox(error, encoder.inputTexture ? MessageType.Error : MessageType.Info);
             return;
         }
+        ImageEncodingEstimates.Draw(encoder);
         bool needsConfiguration = encoder.format == ImageEncodingFormat.AVIF
                                       ? !encoder.avifEncoder || encoder.avifEncoder.width != encoder.width ||
                                             encoder.avifEncoder.height != encoder.height ||
@@ -107,7 +109,8 @@ public abstract class CodecImplementationInspector : UnityEditor.Editor
 {
     public override void OnInspectorGUI()
     {
-        if (UdonSharpGUI.DrawDefaultUdonSharpBehaviourHeader(target, false, false)) return;
+        if (UdonSharpGUI.DrawProgramSource(target, false)) return;
+        UdonSharpGUI.DrawCompileErrorTextArea();
         EditorGUILayout.HelpBox(
             target is AvifDecoder || target is JpegDecoder
                 ? "Pass encoded bytes through the decoder API. Resolution and sampling are read from the " +
