@@ -10,13 +10,21 @@ namespace VrcAvif.Encoder.Editor
 {
 public static class JpegCodecSetup
 {
-    [MenuItem("Tools/AVIF Encoder/Create JPEG codec")]
     public static void Create()
     {
         AvifEncoderSetup.EnsurePrograms(typeof(JpegEncoder), typeof(JpegDecoder));
         var root = new GameObject("JPEG codec");
         Undo.RegisterCreatedObjectUndo(root, "Create JPEG codec");
         Configure(root.AddUdonSharpComponent<JpegEncoder>());
+        Configure(root.AddUdonSharpComponent<JpegDecoder>());
+        Selection.activeGameObject = root;
+    }
+    [MenuItem("Tools/Image Codec/Create JPEG decoder")]
+    public static void CreateDecoder()
+    {
+        AvifEncoderSetup.EnsurePrograms(typeof(JpegDecoder));
+        var root = new GameObject("JPEG decoder");
+        Undo.RegisterCreatedObjectUndo(root, "Create JPEG decoder");
         Configure(root.AddUdonSharpComponent<JpegDecoder>());
         Selection.activeGameObject = root;
     }

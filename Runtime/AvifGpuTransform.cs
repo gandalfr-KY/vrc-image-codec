@@ -7,6 +7,7 @@ namespace VrcImageCodec
 {
 // Fragment shaders only: no CUDA, native plug-in, ComputeShader or CPU thread.
 // x+2y wavefronts preserve left, above and above-right reconstructed neighbors.
+[AddComponentMenu("")]
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class AvifGpuTransform : UdonSharpBehaviour
 {

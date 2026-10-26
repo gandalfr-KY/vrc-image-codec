@@ -18,7 +18,7 @@ public enum AvifProcessingLoad
 }
 public static class AvifEncoderSetup
 {
-    [MenuItem("Tools/AVIF Encoder/Create decoder")]
+    [MenuItem("Tools/Image Codec/Create AVIF decoder")]
     public static void CreateDecoder()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
@@ -40,7 +40,6 @@ public static class AvifEncoderSetup
         Selection.activeGameObject = root;
         EditorSceneManager.MarkSceneDirty(root.scene);
     }
-    [MenuItem("Tools/AVIF Encoder/Create encoder")]
     public static void Create()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)

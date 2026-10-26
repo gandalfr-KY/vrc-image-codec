@@ -6,6 +6,7 @@ using VRC.SDK3.Rendering;
 using VRC.SDKBase;
 namespace VrcImageCodec
 {
+[AddComponentMenu("")]
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class AvifDecoder : UdonSharpBehaviour
 {

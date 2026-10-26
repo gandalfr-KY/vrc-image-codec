@@ -4,6 +4,7 @@ using UnityEngine;
 namespace VrcImageCodec
 {
 // Coordinates GPU stages. Image coding and AVIF assembly stay on the GPU.
+[AddComponentMenu("")]
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class AvifEncoder : UdonSharpBehaviour
 {

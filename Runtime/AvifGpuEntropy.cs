@@ -8,6 +8,7 @@ using VRC.SDK3.Rendering;
 namespace VrcImageCodec
 {
 // Owns syntax/CDF/range resources. CPU reads counts before allocating their corresponding GPU outputs.
+[AddComponentMenu("")]
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class AvifGpuEntropy : UdonSharpBehaviour
 {

@@ -12,7 +12,7 @@ public class MinimalAvifCapture : UdonSharpBehaviour
 
     public void Capture()
     {
-        if (encoder.busy || encoder.gpuTransform.readbackPending)
+        if (encoder.busy || encoder.gpuEntropy.readbackPending)
             return;
         source.enabled = false;
         source.targetTexture = encoder.gpuTransform.inputTexture;

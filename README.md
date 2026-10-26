@@ -4,7 +4,15 @@ Independent single-image AVIF/JPEG encoders and matching decoders for Unity 2022
 
 ## Install
 
-Import the generated unitypackage, or put this package in `Packages/com.gandalfr.vrc-avif`. Use **Tools → AVIF Encoder → Create encoder**. The tool creates the component, compiled Udon programs and working RenderTextures. The VPM archive contains the same source; no native plug-in is required. VCC listing publication is a separate release step.
+Import the generated unitypackage, or put this package in `Packages/com.gandalfr.vrc-avif`. Use **Tools → Image Codec → Create encoder**. The tool creates the component, compiled Udon programs and working RenderTextures. The VPM archive contains the same source; no native plug-in is required. VCC listing publication is a separate release step.
+
+## Encoder settings
+
+The Image Encoder Inspector exposes only format (AVIF/JPEG), chroma sampling (4:2:0/4:4:4), input RenderTexture, resolution and quality (default 60). Implementation components and working resources are configured automatically. Configure outside Play mode.
+
+Resolution is a dropdown of width × height pairs that preserve the input aspect ratio exactly. Candidates never exceed the input dimensions or the supported 1920-pixel side / Full HD pixel-count limits. Common long-edge presets and the largest compatible size are offered; AVIF candidates also satisfy its eight-pixel alignment. No stretching or cropping is applied. If no AVIF size is compatible, use JPEG or change the input RenderTexture.
+
+Call `ImageEncoder.BeginEncoding()` and observe `busy`, `complete`, `error` and `resultBytes`. Call `CancelEncoding()` to cancel. The supplied RenderTexture is resized into an internal snapshot before compression. After cancellation, wait for `readbackPending` to clear before restarting. The format-specific APIs below remain available for integrations that already configure their own resources.
 
 ## API
 
@@ -20,7 +28,7 @@ Both components advance automatically in their own `Update`. Call Begin once and
 | Result | `resultAvif` (`byte[]`) | `resultTexture` (`RenderTexture`) |
 | State | `busy`, `complete`, `error`, `progress` | `busy`, `complete`, `error`, `progress` |
 
-Render into `encoder.gpuTransform.inputTexture`, then call `encoder.BeginEncoding()`. When `complete` is true, pass `encoder.resultAvif` to `decoder.inputAvif` and call `decoder.BeginDecoding()`. When decoding completes, assign `decoder.resultTexture` to your display material. Create a configured decoder using **Tools → AVIF Encoder → Create decoder**. Check `error` when an operation ends without completion.
+Render into `encoder.gpuTransform.inputTexture`, then call `encoder.BeginEncoding()`. When `complete` is true, pass `encoder.resultAvif` to `decoder.inputAvif` and call `decoder.BeginDecoding()`. When decoding completes, assign `decoder.resultTexture` to your display material. Create a configured decoder using **Tools → Image Codec → Create AVIF decoder**. Check `error` when an operation ends without completion.
 
 Keep input bytes unchanged while decoding. The decoder owns its output RenderTexture and reuses it on the next decode; copy it with a GPU blit if a previous image must be retained. Cancel clears the public result/state but keeps GPU allocations for reuse. After cancelling an encode, wait until `gpuEntropy.readbackPending` is false before starting again; for decoding, wait for `decoder.readbackPending == false`. All state is local.
 
@@ -54,7 +62,7 @@ Editor container/frame headers grow while being written; they have no 600/64-byt
 
 ## GPU JPEG API
 
-Use **Tools → AVIF Encoder → Create JPEG codec** to create a configured pair. JPEG is an explicit alternative; it does not change an existing AVIF camera or its Web protocol.
+Use **Tools → Image Codec → Create encoder** and choose JPEG. Use **Tools → Image Codec → Create JPEG decoder** for the matching decoder. JPEG is an explicit alternative; it does not change an existing AVIF camera or its Web protocol.
 
 | Operation | Encoder | Decoder |
 | --- | --- | --- |

@@ -7,6 +7,7 @@ using VRC.SDK3.Rendering;
 namespace VrcImageCodec
 {
 // JPEG image computation stays on the GPU; one readback returns its length and encoded bytes.
+[AddComponentMenu("")]
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class JpegEncoder : UdonSharpBehaviour
 {

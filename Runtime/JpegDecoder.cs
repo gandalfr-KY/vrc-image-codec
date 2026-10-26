@@ -7,6 +7,7 @@ using VRC.SDK3.Rendering;
 namespace VrcImageCodec
 {
 // Restricted Baseline JPEG profile matching JpegEncoder, including GPU header validation.
+[AddComponentMenu("")]
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class JpegDecoder : UdonSharpBehaviour
 {
