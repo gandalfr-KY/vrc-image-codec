@@ -27,8 +27,7 @@ public class ImageEncoderInspector : UnityEditor.Editor
                                                        new[] { "4:2:0", "4:4:4" }) == 0;
             var input = serializedObject.FindProperty("inputTexture");
             EditorGUILayout.PropertyField(input, new GUIContent("Input RenderTexture"));
-            resolutionError = DrawResolution(input.objectReferenceValue as RenderTexture,
-                                             (ImageEncodingFormat)format.enumValueIndex);
+            resolutionError = DrawResolution(input.objectReferenceValue as RenderTexture);
             var quality = serializedObject.FindProperty("quality");
             quality.intValue = EditorGUILayout.IntSlider("Quality", quality.intValue, 1, 100);
         }
@@ -59,7 +58,7 @@ public class ImageEncoderInspector : UnityEditor.Editor
         }
         if (encoder.error != "") EditorGUILayout.HelpBox(encoder.error, MessageType.Error);
     }
-    private string DrawResolution(RenderTexture input, ImageEncodingFormat format)
+    private string DrawResolution(RenderTexture input)
     {
         var width = serializedObject.FindProperty("width");
         var height = serializedObject.FindProperty("height");
@@ -68,11 +67,11 @@ public class ImageEncoderInspector : UnityEditor.Editor
             EditorGUILayout.LabelField("Resolution", width.intValue + " × " + height.intValue);
             return "";
         }
-        var sizes = ImageEncoderSetup.Resolutions(input, format);
+        var sizes = ImageEncoderSetup.Resolutions(input);
         if (sizes.Length == 0)
         {
             EditorGUILayout.LabelField("Resolution", input ? "No compatible size" : "Assign an input first");
-            string inputError = ImageEncoderSetup.InputError(input, format);
+            string inputError = ImageEncoderSetup.InputError(input);
             if (inputError != "") return inputError;
             return input ? "No supported resolution keeps this aspect ratio. Use an input RenderTexture " +
                                "with a standard aspect ratio, such as 16:9, 4:3 or 1:1."

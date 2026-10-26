@@ -22,19 +22,19 @@ public static class ImageEncoderSetup
         EditorSceneManager.MarkSceneDirty(root.scene);
     }
 
-    public static string InputError(RenderTexture input, ImageEncodingFormat format)
+    public static string InputError(RenderTexture input)
     {
-        if (!input || format != ImageEncodingFormat.AVIF) return "";
+        if (!input) return "";
         if (input.width < 16 || input.height < 16)
-            return "Set both dimensions of the input RenderTexture to at least 16 pixels for AVIF.";
+            return "Set both dimensions of the input RenderTexture to at least 16 pixels.";
         if (input.width % 8 != 0 || input.height % 8 != 0)
-            return "Set both dimensions of the input RenderTexture to multiples of 8 for AVIF.";
+            return "Set both dimensions of the input RenderTexture to multiples of 8.";
         return "";
     }
 
-    public static Vector2Int[] Resolutions(RenderTexture input, ImageEncodingFormat format)
+    public static Vector2Int[] Resolutions(RenderTexture input)
     {
-        if (!input || InputError(input, format) != "") return new Vector2Int[0];
+        if (!input || InputError(input) != "") return new Vector2Int[0];
         int a = input.width, b = input.height;
         while (b != 0)
         {
@@ -42,9 +42,9 @@ public static class ImageEncoderSetup
             a = b;
             b = remainder;
         }
-        // The reduced ratio is integral; multiplying both sides by 8 satisfies the AVIF profile.
-        int unitWidth = input.width / a * (format == ImageEncodingFormat.AVIF ? 8 : 1);
-        int unitHeight = input.height / a * (format == ImageEncodingFormat.AVIF ? 8 : 1);
+        // Both formats use the same authoring grid while preserving the input ratio exactly.
+        int unitWidth = input.width / a * 8;
+        int unitHeight = input.height / a * 8;
         int limit = Mathf.Min(
             Mathf.Min(input.width / unitWidth, input.height / unitHeight),
             Mathf.Min(ImageEncoder.MaximumDimension / unitWidth, ImageEncoder.MaximumDimension / unitHeight));
@@ -57,21 +57,17 @@ public static class ImageEncoderSetup
         {
             int scale = Mathf.Min(longEdge / unitLongEdge, limit);
             var size = new Vector2Int(unitWidth * scale, unitHeight * scale);
-            if (scale > 0 && (format != ImageEncodingFormat.AVIF || Mathf.Min(size.x, size.y) >= 16) &&
-                !sizes.Contains(size))
-                sizes.Add(size);
+            if (scale > 0 && Mathf.Min(size.x, size.y) >= 16 && !sizes.Contains(size)) sizes.Add(size);
         }
         var maximum = new Vector2Int(unitWidth * limit, unitHeight * limit);
-        if ((format != ImageEncodingFormat.AVIF || Mathf.Min(maximum.x, maximum.y) >= 16) &&
-            !sizes.Contains(maximum))
-            sizes.Add(maximum);
+        if (Mathf.Min(maximum.x, maximum.y) >= 16 && !sizes.Contains(maximum)) sizes.Add(maximum);
         return sizes.ToArray();
     }
 
     public static void Configure(ImageEncoder encoder)
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode ||
-            InputError(encoder.inputTexture, encoder.format) != "" || encoder.ConfigurationError() != "")
+        if (EditorApplication.isPlayingOrWillChangePlaymode || InputError(encoder.inputTexture) != "" ||
+            encoder.ConfigurationError() != "")
             return;
         Undo.RecordObject(encoder, "Configure image encoder");
         if (encoder.format == ImageEncodingFormat.AVIF)
