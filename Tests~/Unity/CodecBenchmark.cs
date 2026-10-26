@@ -145,27 +145,41 @@ public class CodecBenchmark : MonoBehaviour
         }
         // Validation runs after the measured completion fence; no validation work affects timing.
         var decoded = (RenderTexture)decoders[Codec].GetProgramVariable("resultTexture");
+        phase = 3;
+        SavePixels(decoded, Path.Combine(directory, measurement.id + ".rgba"),
+                   () =>
+                   {
+                       string sourcePath =
+                           Path.Combine(directory, Image + "-" + width + "x" + height + "-source.rgba");
+                       if (File.Exists(sourcePath))
+                       {
+                           Finish();
+                           return;
+                       }
+                       SavePixels(input, sourcePath, Finish);
+                   });
+    }
+
+    void SavePixels(Texture texture, string path, Action finished)
+    {
         display =
             new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
         display.Create();
-        Graphics.Blit(decoded, display);
-        phase = 3;
+        Graphics.Blit(texture, display);
         AsyncGPUReadback.Request(display, 0, TextureFormat.RGBA32,
                                  request =>
                                  {
+                                     display.Release();
+                                     Destroy(display);
                                      if (request.hasError)
                                      {
                                          File.WriteAllText(Path.Combine(directory, "error.txt"),
-                                                           "Display validation readback failed: " +
-                                                               measurement.id);
+                                                           "Validation readback failed: " + path);
                                          phase = 9;
                                          return;
                                      }
-                                     File.WriteAllBytes(Path.Combine(directory, measurement.id + ".rgba"),
-                                                        request.GetData<byte>().ToArray());
-                                     display.Release();
-                                     Destroy(display);
-                                     Finish();
+                                     File.WriteAllBytes(path, request.GetData<byte>().ToArray());
+                                     finished();
                                  });
     }
 

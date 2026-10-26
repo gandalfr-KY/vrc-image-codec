@@ -3,10 +3,22 @@ int AomCost(int i){return (int)_AomCosts.Load(int3(i,0,0)).r;}
 int AomEobCost(int i){return (int)_AomCosts.Load(int3(i,1,0)).r;}
 static const int Aom_scan[64]={0,8,1,2,9,16,24,17,10,3,4,11,18,25,32,40,33,26,19,12,5,6,13,20,27,34,41,48,56,49,42,35,28,21,14,7,15,22,29,36,43,50,57,58,51,44,37,30,23,31,38,45,52,59,60,53,46,39,47,54,61,62,55,63};
 static const int Aom_nzOffsets[64]={0,1,6,6,21,21,21,21,1,6,6,21,21,21,21,21,6,6,21,21,21,21,21,21,6,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21};
-// Profile tuning for prediction screening and chroma RDO: rate weight is quantizer-step squared * 0.07.
-// Table-based rate costs additionally use 1/512-bit units. This is not a quality percentage or AV1 requirement.
-// The luma coefficient trellis below uses a separate libaom-derived multiplier.
-static const float PredictionRateWeight = 0.07;
+// libaom 3.14.1, 8-bit all-intra PSNR, sharpness=0, no delta-Q/AQ.
+// rd.c: q is the luma DC dequantizer, including when evaluating chroma.
+float KeyframeRdMultiplier(){
+ float q=_QuantDc;
+ return floor(q*q*(3.3+0.0015*q));
+}
+// rd.h: rate is Q9 bits and RDCOST scales distortion by 2^7.
+// tx_search.c divides raw 4x4/8x8 coefficient SSE by 4 (MAX_TX_SCALE=1).
+// Keep our SSE unshifted and move that factor into the rate multiplier.
+float ModeRateWeight(){return KeyframeRdMultiplier()*4./(128.*512.);}
+// txb_rdopt.c/encodetxb.h: all-intra trellis multipliers Y=17, UV=13,
+// use_chroma_trellis_rd_mult=1, rounded by 2^5. Trellis uses unshifted SSE.
+float CoefficientRateWeight(int plane){
+ float multiplier=floor((KeyframeRdMultiplier()*8*(plane==0?17:13)+16)/32);
+ return multiplier/(128.*512.);
+}
 int _QuantUvDc,_QuantUvAc;
 int StepBase(int plane,int local){return plane==0?(local==0?_QuantDc:_QuantAc):(local==0?_QuantUvDc:_QuantUvAc);}
 
@@ -40,6 +52,11 @@ int RdoEobCost(int eob){
  if(bits>0)cost+=AomCost(374+(token-3)*2+(((eob-start)>>(bits-1))&1))+512*(bits-1);
  return cost;
 }
+int LumaCoefficientRate(int q[64],int end,int levels[144]){
+ int rate=RdoEobCost(end);
+ [loop]for(int k=0;k<end;k++){int ci=Aom_scan[k];rate+=RdoCoeffCost(ci,k,end,q[ci],levels);}
+ return rate;
+}
 int LumaQuant(int value,int local,int tx){if(tx!=4)return QuantAt(value,0,local);int q=StepBase(0,local);if(abs(value)<(q+1)/2)return 0;int a=(int)floor((min(abs(value)+q/2,32767)*floor(65536./q))/65536.);return value<0?-a:a;}
 int PredictionRate(int code,int2 xy);
 // Copyright (c) 2021, Alliance for Open Media. All rights reserved.
@@ -56,10 +73,7 @@ float OptimizeRdo(int transformed[64],int mode,int txType,int2 xy,out int optimi
   levels[k+((k>>3)<<2)]=min(abs(q[k]),127);
  }
  [loop]for(int k=0;k<64;k++)if(q[Aom_scan[k]]!=0)end=k+1;
- // rd.c, KF_UPDATE: q is DC quant, not the public quality slider.
- // trellis: round(x->rdmult * 8 * 17 / 32); RDCOST / 128 / 512.
- float rdBase=floor((float)_QuantDc*_QuantDc*(3.3+.0015*_QuantDc));
- float lambda=floor((rdBase*8*17+16)/32)/65536.;
+ float lambda=CoefficientRateWeight(0);
  if(end>0){
   int accRate=RdoEobCost(end)-AomCost(0),si=end-1,ci=Aom_scan[si],value=q[ci];
   float accDist=0,step=StepBase(0,(ci&7)*8+(ci>>3));
@@ -110,11 +124,11 @@ float OptimizeRdo(int transformed[64],int mode,int txType,int2 xy,out int optimi
    }
   }
  }
- float distortion=0;int rate=RdoEobCost(end);
+ float distortion=0;
  [loop]for(int k=0;k<64;k++){
   float d=t[k]-q[k]*StepBase(0,(k&7)*8+(k>>3));distortion+=d*d;
   optimized[(k&7)*8+(k>>3)]=q[k];
  }
- [loop]for(int k=0;k<end;k++){int ci=Aom_scan[k];rate+=RdoCoeffCost(ci,k,end,q[ci],levels);}
- return distortion+lambda*(rate+PredictionRate(mode,xy)+(end>0?(txType==0?512:1536):0));
+ int rate=LumaCoefficientRate(q,end,levels);
+ return distortion+ModeRateWeight()*(rate+PredictionRate(mode,xy)+(end>0?(txType==0?512:1536):0));
 }

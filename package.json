@@ -1,7 +1,7 @@
 {
   "name": "com.gandalfr.vrc-avif",
   "displayName": "VRC AVIF and JPEG Codec",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "unity": "2022.3",
   "description": "Paired GPU AVIF (4:2:0/4:4:4) and Baseline JPEG (4:4:4/4:2:0) image codecs for UdonSharp. No network or encryption.",
   "license": "BSD-2-Clause",

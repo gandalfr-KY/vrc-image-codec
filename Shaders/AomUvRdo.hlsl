@@ -31,7 +31,7 @@ int UvRate(int q[16],int end){
  return rate;
 }
 float OptimizeUv(int t[16],int plane,out int q[16]){
- int end=0;float distortion=0,lambda=(float)_QuantUvAc*_QuantUvAc*PredictionRateWeight/512.;
+ int end=0;float distortion=0,lambda=CoefficientRateWeight(plane);
  [unroll]for(int k=0;k<16;k++){q[k]=QuantAt(t[k],plane,k);float d=t[k]-q[k]*StepBase(plane,k);distortion+=d*d;}
  [unroll]for(int k=0;k<16;k++)if(q[UvScan[k]]!=0)end=k+1;
  int rate=UvRate(q,end);
@@ -44,6 +44,6 @@ float OptimizeUv(int t[16],int plane,out int q[16]){
   if(change+lambda*(newRate-rate)<0){distortion+=change;rate=newRate;end=newEnd;}else q[ci]=original;
  }
  float zero=0;[unroll]for(int k=0;k<16;k++)zero+=(float)t[k]*t[k];
- if(zero+lambda*UvSkip[1]<distortion+lambda*rate){[unroll]for(int k=0;k<16;k++)q[k]=0;return zero+lambda*UvSkip[1];}
- return distortion+lambda*rate;
+ if(zero+lambda*UvSkip[1]<distortion+lambda*rate){[unroll]for(int k=0;k<16;k++)q[k]=0;return zero+ModeRateWeight()*UvSkip[1];}
+ return distortion+ModeRateWeight()*rate;
 }

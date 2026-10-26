@@ -198,7 +198,7 @@ float cflTrialCost(int block,int2 xy,int plane,int alpha,int average){
  [unroll]for(int k=0;k<16;k++){q[k]=QuantAt(t[k],plane,k);float d=t[k]-q[k]*StepBase(plane,k);distortion+=d*d;}
  [unroll]for(int k=0;k<16;k++)if(q[UvScan[k]]!=0)end=k+1;
  float alphaBits=alpha==0?1:3+firstbithigh(abs(alpha));
- return distortion+(float)_QuantUvAc*_QuantUvAc*PredictionRateWeight*(UvRate(q,end)/512.+alphaBits);
+ return distortion+ModeRateWeight()*(UvRate(q,end)+512*alphaBits);
 }
 float4 chromaCandidate(v2f_img i):SV_Target{
  int2 p=min((int2)(i.uv*float2(_PhotoSize.z*8,_PhotoSize.w)),int2(_PhotoSize.z*8-1,_PhotoSize.w-1));
@@ -214,7 +214,7 @@ float4 chromaCandidate(v2f_img i):SV_Target{
   int optimized[16];distortion+=OptimizeUv(t,plane,optimized);
 
  }
- return float4(distortion+_QuantUvAc*_QuantUvAc*.07*rate,0,0,0);
+ return float4(distortion+ModeRateWeight()*512*rate,0,0,0);
 }
 float4 selectChroma(v2f_img i):SV_Target{
  int2 xy=min((int2)(i.uv*_PhotoSize.zw),(int2)_PhotoSize.zw-1);if(xy.x+2*xy.y!=_Diagonal)return 0;
@@ -389,9 +389,16 @@ float4 cdefFilter(v2f_img input):SV_Target{
    int2 p=min((int2)(input.uv*float2(_PhotoSize.z*51,_PhotoSize.w)),int2(_PhotoSize.z*51-1,_PhotoSize.w-1)),xy=int2(p.x/51,p.y);
    if(xy.x+2*xy.y!=_Diagonal)return 0;int code=angleCodes[p.x%51];if(!availableCode(code,xy))return float4(1e30,0,0,0);
    int t[64],block=xy.y*(int)_PhotoSize.z+xy.x;transformCandidate(block,xy,code,0,t);
-   float distortion=0,rate=PredictionRate(code,xy)/512.;int end=0;
-   [loop]for(int k=0;k<64;k++){int ci=Aom_scan[k],rowMajor=(ci&7)*8+(ci>>3),q=QuantAt(t[rowMajor],0,rowMajor);float error=t[rowMajor]-q*StepBase(0,rowMajor);distortion+=error*error;if(q!=0){end=k+1;rate+=3+2*firstbithigh(abs(q)+1);}else rate+=.25;}
-   return float4(distortion+_QuantAc*_QuantAc*PredictionRateWeight*(rate+end*.2),0,0,0);
+   int q[64],levels[144],end=0;float distortion=0;
+   [loop]for(int k=0;k<144;k++)levels[k]=0;
+   [loop]for(int k=0;k<64;k++){
+    int rowMajor=(k&7)*8+(k>>3);q[k]=QuantAt(t[rowMajor],0,rowMajor);
+    float error=t[rowMajor]-q[k]*StepBase(0,rowMajor);distortion+=error*error;
+    levels[k+((k>>3)<<2)]=min(abs(q[k]),127);
+   }
+   [loop]for(int k=0;k<64;k++)if(q[Aom_scan[k]]!=0)end=k+1;
+   int rate=PredictionRate(code,xy)+LumaCoefficientRate(q,end,levels)+(end>0?512:0);
+   return float4(distortion+ModeRateWeight()*rate,0,0,0);
   }
   float4 shortlistModes(v2f_img input):SV_Target{
    int2 p=min((int2)(input.uv*float2(_PhotoSize.z*2,_PhotoSize.w)),int2(_PhotoSize.z*2-1,_PhotoSize.w-1)),xy=int2(p.x/2,p.y);if(xy.x+2*xy.y!=_Diagonal)return 0;
