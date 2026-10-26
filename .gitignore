@@ -2,3 +2,9 @@ test-results/
 release/
 __pycache__/
 *.tmp
+
+# Ignore metadata for generated output; keep source asset .meta files tracked.
+test-results.meta
+release.meta
+__pycache__.meta
+*.tmp.meta
