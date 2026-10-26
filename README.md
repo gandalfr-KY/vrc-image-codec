@@ -131,7 +131,7 @@ Encoderの設定値は`Format`、`SubsampleChroma`、`InputTexture`、`Width`、
 
 2026年10月26日、Unity 2022.3.22f1のClientSimで測定しました。環境はNVIDIA GeForce RTX 3050、AMD Ryzen 5 5600、Direct3D 11、Linear色空間、目標60fpsです。VRChatクライアント内での測定ではありません。
 
-Quality 60で三枚の写真を変換したときの平均です。各条件は一回ずつ実行し、初回の準備時間も含みます。AVIFはFast設定で測定しています。コンポーネントの初期設定はNormalのため、通常設定での待ち時間とは異なります。**JPEGは実行時間、AVIFはバイト長を太字で示しています。**
+Quality 60で三枚の写真を変換したときの平均です。各条件は一回ずつ実行し、初回の準備時間も含みます。AVIFはFast設定で測定しています。コンポーネントの初期設定はNormalのため、通常設定での待ち時間とは異なります。
 
 | 形式 | 色差 | 解像度 | エンコード（秒） | デコード（秒） | バイナリ長（B） |
 | --- | --- | --- | ---: | ---: | ---: |
@@ -158,9 +158,9 @@ Quality 60で三枚の写真を変換したときの平均です。各条件は�
 
 時間は形式別コーデックの開始から完了通知までで、GPU処理と完了待ちを含みます。共通APIの入力コピー、撮影・通信・保存・検証処理は含みません。バイナリ長は圧縮ファイル自体のバイト数で、暗号化やURL化による増加分は含みません。異なる形式のQuality 60は、同じ画質を表すものではありません。
 
-**全180条件でFFmpegとの画像比較に合格しました。** 各出力をFFmpeg 8.0.1で一回ずつデコードし、GPUで復元した画像と寸法・向き・RGB値を比較しています。許容差は最大3/255、RMS 1.5/255です。Quality 60・70・80の全結果は[JSON](Documentation/Benchmarks/0.7.0.json)・[CSV](Documentation/Benchmarks/0.7.0.csv)、再現手順は[ベンチマークの実行手順](https://github.com/gandalfr-KY/vrc-image-codec/blob/main/Tests~/README.md)にあります。同梱の三枚の写真、五段階の解像度、二つの形式、二つのサンプリング、三つのQualityを使います。
+各出力をFFmpeg 8.0.1で一回ずつデコードし、GPUで復元した画像と寸法・向き・RGB値を比較しています。許容差は最大3/255、RMS 1.5/255です。Quality 60・70・80の全結果は[JSON](Documentation/Benchmarks/0.7.0.json)・[CSV](Documentation/Benchmarks/0.7.0.csv)、再現手順は[ベンチマークの実行手順](https://github.com/gandalfr-KY/vrc-image-codec/blob/main/Tests~/README.md)にあります。同梱の三枚の写真、五段階の解像度、二つの形式、二つのサンプリング、三つのQualityを使います。
 
-処理時間はGPUやフレームレートなどで変わります。短時間で完了しても、一フレームに大きな負荷がかかる場合があるため、組み込むワールドでも負荷を確認してください。
+処理時間はGPUやフレームレートなどで変わります。一フレームに大きな負荷がかかる場合があるため、組み込むワールドで実際に負荷を確認してください。
 
 <details>
 <summary>0.6以前からの移行</summary>
@@ -175,7 +175,7 @@ Quality 60で三枚の写真を変換したときの平均です。各条件は�
 | Encoderの設定フィールドを変更 | Inspectorで設定。実行時の画像はTryメソッドへ渡し、画質は`Quality`で指定 |
 | 本体に含まれていた`ImageCodecLink` | サンプルに移動。名前空間は`VrcImageCodec.Samples` |
 
-更新後はEncoderのInspectorで入力と設定を確認してください。0.6以前のDecoderは**Create decoder**で作り直し、自分のスクリプトやギミックの参照を差し替えてください。
+更新後はEncoderのInspectorで入力と設定を確認してください。
 
 Editorスクリプトから生成する場合は、`ImageEncoderSetup.Configure(encoder, input, format, width, height, quality, subsampleChroma)`を使えます。`AvifEncoder`や`JpegEncoder`は内部実装・ベンチマーク用です。新しいギミックでは`ImageEncoder`・`ImageDecoder`を使ってください。
 
@@ -316,7 +316,7 @@ Read-only properties do not make array or texture contents immutable. Results re
 
 Measured on October 26, 2026 in Unity 2022.3.22f1 ClientSim with an NVIDIA GeForce RTX 3050, AMD Ryzen 5 5600, Direct3D 11, Linear color space, and a target of 60 fps. These are not VRChat client measurements.
 
-Values are the mean across three photographs at Quality 60. Each case ran once, including first-use preparation costs. AVIF used Fast scheduling; the component default is Normal, so default wait times differ. **JPEG execution times and AVIF byte sizes are bold.**
+Values are the mean across three photographs at Quality 60. Each case ran once, including first-use preparation costs. AVIF used Fast scheduling; the component default is Normal, so default wait times differ. 
 
 | Format | Chroma | Resolution | Encode (s) | Decode (s) | Binary size (B) |
 | --- | --- | --- | ---: | ---: | ---: |
@@ -343,7 +343,7 @@ Values are the mean across three photographs at Quality 60. Each case ran once, 
 
 Times cover the format-specific codec's start through completion, including GPU processing and completion waits. Common API input copying, capturing, networking, file saving, and validation are excluded. Binary size is the encoded file size, excluding encryption and URL overhead. Quality 60 does not imply equal visual quality across formats.
 
-**All 180 cases passed external image comparison.** Each output was decoded once using FFmpeg 8.0.1 and compared with the GPU reconstruction for dimensions, orientation, and RGB values. Tolerance: maximum 3/255, RMS 1.5/255. Full Quality 60/70/80 results are available as [JSON](Documentation/Benchmarks/0.7.0.json) and [CSV](Documentation/Benchmarks/0.7.0.csv). Follow the [benchmark guide](https://github.com/gandalfr-KY/vrc-image-codec/blob/main/Tests~/README.md) to reproduce the matrix: three bundled photos, five resolutions, two codecs, two samplings, and three quality settings.
+Each output was decoded once using FFmpeg 8.0.1 and compared with the GPU reconstruction for dimensions, orientation, and RGB values. Tolerance: maximum 3/255, RMS 1.5/255. Full Quality 60/70/80 results are available as [JSON](Documentation/Benchmarks/0.7.0.json) and [CSV](Documentation/Benchmarks/0.7.0.csv). Follow the [benchmark guide](https://github.com/gandalfr-KY/vrc-image-codec/blob/main/Tests~/README.md) to reproduce the matrix: three bundled photos, five resolutions, two codecs, two samplings, and three quality settings.
 
 Timing varies with GPU and frame rate. A short completion time can still include a large per-frame workload; profile the codec in your target world.
 
@@ -359,8 +359,6 @@ Version 0.7 reorganizes the public API. Serialized setting names and script GUID
 | State fields such as `decoder.resultTexture` | Read-only properties such as `ResultTexture` |
 | Modifying encoder configuration fields | Configure in Inspector. Pass runtime images to Try methods and set quality through `Quality` |
 | `ImageCodecLink` in the core runtime | Import the sample; namespace is `VrcImageCodec.Samples` |
-
-After upgrading, check input and settings in the encoder Inspector. Recreate decoders from 0.6 or earlier using **Create decoder** and update references in your scripts or other components.
 
 Editor integrations can use `ImageEncoderSetup.Configure(encoder, input, format, width, height, quality, subsampleChroma)`. `AvifEncoder` and `JpegEncoder` are internal implementations and benchmark components; use `ImageEncoder` and `ImageDecoder` in new integrations.
 
