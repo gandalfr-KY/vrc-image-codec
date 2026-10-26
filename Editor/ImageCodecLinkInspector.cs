@@ -26,30 +26,21 @@ public class ImageCodecLinkInspector : UnityEditor.Editor
             EditorGUILayout.PropertyField(serializedObject.FindProperty("display"),
                                           new GUIContent("Display"));
         }
-        if (serializedObject.ApplyModifiedProperties()) UdonSharpEditorUtility.CopyProxyToUdon(link);
+        if (serializedObject.ApplyModifiedProperties() && !EditorApplication.isPlayingOrWillChangePlaymode)
+            UdonSharpEditorUtility.CopyProxyToUdon(link);
         string error = link.ConfigurationError();
         if (error != "")
         {
             EditorGUILayout.HelpBox(error, MessageType.Info);
             return;
         }
-        if (EditorApplication.isPlaying)
-        {
-            var backing = UdonSharpEditorUtility.GetBackingUdonBehaviour(link);
-            EditorGUILayout.LabelField(backing.GetProgramVariable("status") as string ?? "Starting...",
-                                       EditorStyles.wordWrappedLabel);
-            using (new EditorGUI.DisabledScope((bool)backing.GetProgramVariable(
-                "busy"))) if (GUILayout.Button("Encode & Decode")) backing.SendCustomEvent("Begin");
-        }
-        else
-        {
-            ConnectButton(link.GetComponent<Button>(), link);
-            EditorGUILayout.HelpBox(
-                "Encoded results are passed to the decoder automatically. " +
-                    "Place this component on a UI Button to run it with that button, or on a world object " +
-                    "with a collider to run it with Use.",
-                MessageType.Info);
-        }
+        if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+        ConnectButton(link.GetComponent<Button>(), link);
+        EditorGUILayout.HelpBox(
+            "Encoded results are passed to the decoder automatically. " +
+                "Place this component on a UI Button to run it with that button, or on a world object " +
+                "with a collider to run it with Use.",
+            MessageType.Info);
     }
 
     public static void ConnectButton(Button button, ImageCodecLink link)

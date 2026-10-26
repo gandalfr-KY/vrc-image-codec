@@ -16,7 +16,7 @@ Call `ImageEncoder.BeginEncoding()` and observe `busy`, `complete`, `error` and 
 
 ## Connect components without writing code
 
-Create an encoder and decoder with **Tools → Image Codec**, then add **Image Codec Link** to a UI Button (or create a standalone link through the same menu). Drag the Image Encoder into **Encoder**, the Image Decoder into **Decoder**, and your output RawImage into **Display**. A UI Button on the same object is connected automatically after those references are assigned. For a world object, add a collider and use it to invoke the link. In Play mode the Inspector also provides an **Encode & Decode** button and status.
+Create an encoder and decoder with **Tools → Image Codec**, then add **Image Codec Link** to a UI Button (or create a standalone link through the same menu). Drag the Image Encoder into **Encoder**, the Image Decoder into **Decoder**, and your output RawImage into **Display**. A UI Button on the same object is connected automatically after those references are assigned. For a world object, add a collider and use it to invoke the link. Connections are edited outside Play mode; the sample button and status label show the running operation.
 
 The link starts encoding, passes each completed byte array to the decoder without copying, and assigns the decoded RenderTexture to Display. It also forwards results when another component starts the encoder. Use one link per encoder/decoder pair; the link owns that decoder while processing. The encoder input must already contain the image you want to convert. No binary-string object, URL or file is required.
 
