@@ -16,3 +16,13 @@ For real Udon/GPU validation, copy `DecoderTrial.cs` to an isolated Unity projec
 Create `Logs/AvifDecoder/jobs.json` with `{"jobs":[{"id":"sample","file":"absolute/path/to/sample.avif"}]}`. Use this encoder's AVIF output. Write `run` to `Logs/AvifDecoder/run.request`. The trial executes compiled Udon, saves a reconstructed YUV atlas and PNG, and records timings in `results.json`. It runs steps continuously, excluding normal frame scheduling waits; its final readback is for validation only. Check `done.txt` or `error.txt`.
 
 Run `python Tools~/check-decoder-gpu.py /path/to/UnityProject/Logs/AvifDecoder` to compare all YUV samples with FFmpeg. RGB upsampling/color conversion is distinct from this YUV equality check. Driver timings include the test-only final GPU readback.
+# GPU JPEG pair
+
+`python Tools~/check-jpeg.py <isolated-unity-project> --prepare` installs the test sources and creates
+three Full-HD Q60 fixtures plus odd-size Q1/Q60/Q100 and linear-color fixtures. Refresh Unity, request
+the compiled-Udon ClientSim run with `--run`, and run without flags after `done.txt` and `stopped.txt`
+appear. The runner verifies normal JPEG decoding through FFmpeg, original dimensions/orientation,
+GPU-decoded RGB tolerance, boundary rejection, malformed headers/entropy, cancellation and reuse of
+both components. Begin/upload/command submission and completion readbacks are timed; native PNG
+observation is outside codec time. The setup restores the previous scene and ClientSim settings.
+No VRChat client is launched. The suite is opt-in because it requires Unity and a D3D11 GPU.

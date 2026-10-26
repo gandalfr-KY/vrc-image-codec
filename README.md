@@ -1,6 +1,6 @@
-# VRC AVIF Codec
+# VRC AVIF and JPEG Codec
 
-Independent single-image AVIF encoder and matching decoder for Unity 2022.3 / VRChat Worlds SDK 3.10.5 or later. BSD-2-Clause; upstream attribution and the AOM patent grant are in ThirdParty/AV1 and PATENTS.
+Independent single-image AVIF/JPEG encoders and matching decoders for Unity 2022.3 / VRChat Worlds SDK 3.10.5 or later. BSD-2-Clause; upstream attribution and the AOM patent grant are in ThirdParty/AV1 and PATENTS.
 
 ## Install
 
@@ -38,7 +38,34 @@ For an existing encoder, run `AvifEncoderSetup.Configure(...)` once after upgrad
 
 The decoder accepts this encoder's restricted still-image profile, not general AVIF from arbitrary software: 8-bit SDR, 4:2:0, fixed 8×8 luma / 4×4 chroma transforms, one image, one tile, known headers, at most Full HD and 100,000 bytes. Unsupported headers fail through `error`. Alpha, HDR, animation, other block layouts and arbitrary libaom output are outside this API. RGB output is sRGB with nearest chroma upsampling; YUV reconstruction is independently checked against FFmpeg.
 
-There is no JPEG fallback, network call, URL handling, encryption, synchronization or storage dependency. Class names, package ID and existing asset GUIDs are retained so scenes can resolve moved scripts.
+There is no automatic codec fallback, network call, URL handling, encryption, synchronization or storage dependency. Class names, package ID and existing asset GUIDs are retained so scenes can resolve moved scripts.
+
+## GPU JPEG API
+
+Use **Tools → AVIF Encoder → Create JPEG codec** to create a configured pair. JPEG is an explicit alternative; it does not change an existing AVIF camera or its Web protocol.
+
+| Operation | Encoder | Decoder |
+| --- | --- | --- |
+| Component | `TernaryJpegEncoder` | `TernaryJpegDecoder` |
+| Input | `inputTexture` (`Texture`, matching width/height) | `inputJpeg` (`byte[]`) |
+| Start | `BeginEncoding()` | `BeginDecoding()` |
+| Cancel | `CancelEncoding()` | `CancelDecoding()` |
+| Output | `resultJpeg` (`byte[]`) | `resultTexture` (`RenderTexture`) |
+| State | `busy`, `complete`, `error`, `progress`, `readbackPending`, `elapsedSeconds` | Same |
+
+Call Begin once; GPU commands and readback callbacks finish the job without a Step/Update loop. Poll `complete`/`error`. While a job is busy, leave its settings, input, and material unchanged. Materials belong to individual components; do not share mutable material instances between concurrent jobs. After Cancel, wait for `readbackPending == false` before restarting. The decoder owns/reuses its result texture; GPU-blit a copy to keep an earlier image.
+
+Encoder settings: width/height 1–1920, at most 2,073,600 pixels, quality 1–100 (default 60), 8-bit SDR YCbCr **4:4:4**. Odd dimensions are padded internally and cropped correctly on output. `linearInput` should match the input texture's sampled color space (normally true in a Linear project; false for an uploaded texture containing raw sRGB bytes). `linearOutput` normally matches the project's color space. Decoder output is RGBAHalf for linear output (to preserve dark detail) and RGBA32 for sRGB output. The byte-buffer limit is 8 MiB.
+
+The output is a normal JFIF Baseline JPEG with Annex K Huffman tables, interleaved three-component scan and a restart interval of **one 8×8 MCU**. This deliberately trades some compression for independent GPU entropy work. Standard JPEG readers can display it. The matching GPU decoder accepts exactly this header/profile (arbitrary dimensions, quantization tables and entropy payload within that profile), **not arbitrary JPEG**: progressive JPEG, 4:2:0/4:2:2, other marker layouts/tables and JPEGs without restart markers are rejected.
+
+GPU encoder: color conversion → separable DCT/quantization → per-MCU Huffman encoding and byte counts → prefix sum/max → independent byte slots → stuffing/restart markers/JFIF assembly. Only an 8-byte size/slot count and the finished JPEG cross back to Udon. Segment slots use the actual maximum encoded length instead of worst-case per-MCU allocation.
+
+GPU decoder: byte upload → header validation → parallel restart-marker indexing → prefix sum → block-start states/Huffman decoding → dequantization/separable IDCT → RGB conversion and entropy validation. Only dimensions and final validation status return to Udon; reconstructed pixels remain on GPU. CPU responsibilities are input/result buffer copies, allocations, command submission and completion state. No CPU JPEG coding or native runtime plugin is used. This follows the restart-segment parallelism described by [GPUJPEG](https://github.com/CESNET/GPUJPEG); CUDA source was not transplanted into Udon.
+
+JPEG needs PC shader model 5.0 and floating-point render targets. Encoding and decoding retain their working textures for reuse (roughly 140 MiB combined for a Full-HD pair; image-dependent segment/output allocations add variation). First-use allocation/driver compilation can stall frames. A fast completion time does not guarantee a small maximum frame time. Call Cancel to cancel a result; it cannot interrupt GPU work already submitted.
+
+`python Tools~/check-jpeg.py <isolated-unity-project> --prepare`, refresh Unity, then `--run`. Run without flags after ClientSim stops to verify eight image cases, external FFmpeg decoding, RGB error tolerance (maximum 3/255, RMS ≤1/255), invalid input/settings, cancellation and reuse. Quality/IDCT/YCbCr rounding need not be bit-identical to other JPEG codecs. End-to-end timings include Begin, uploads, GPU completion and result/status readback; PNG validation is excluded. A 100× improvement is a target, not a measured claim without a matching prior CPU/Udon baseline.
 
 ## Minimal camera example
 
