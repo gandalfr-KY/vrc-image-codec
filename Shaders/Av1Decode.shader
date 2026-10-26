@@ -518,7 +518,8 @@ float4 InitializeState(v2f_img i) : SV_Target
                                                     inout PointStream<StatePoint> outputStream)
 {
     if (primitive != 0 || instance > 8) return;
-    wantedWord = -100000;
+    // State replay emits no coefficient packet: a negative block index cannot match a decoded block.
+    wantedWord = -PacketWords();
     DecodeChunk(_ChunkStart + 15);
     int count = 128;
     if (instance == 8) count = 2 + metaCount * 2;

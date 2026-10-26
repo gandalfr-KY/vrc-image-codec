@@ -7,7 +7,7 @@ using VRC.SDK3.Rendering;
 
 namespace VrcImageCodec
 {
-// Owns syntax/CDF/range resources. Only a record count and completed AVIF cross to the CPU.
+// Owns syntax/CDF/range resources. CPU reads counts before allocating their corresponding GPU outputs.
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class AvifGpuEntropy : UdonSharpBehaviour
 {
@@ -27,8 +27,9 @@ public class AvifGpuEntropy : UdonSharpBehaviour
     public byte[] result;
     private RenderTexture prefixA, prefixB, countTexture, events;
     private RenderTexture sortedA, sortedB, cdfCheckpoints, intervals, resolvedTokens;
-    private RenderTexture rangeCheckpoints, rangeCount, rangeDigits, rangeOutput;
-    private bool waitingForCount;
+    private RenderTexture rangeCheckpoints, rangeCount, rangeDigits, rangeOutput, outputLengthTexture;
+    private const int SyntaxCountStage = 0, OutputLengthStage = 1, ImageStage = 2;
+    private int readbackStage, encodedLength;
 
     private byte[] countReadback = new byte[4];
     private byte[] imageReadback;
@@ -69,7 +70,8 @@ public class AvifGpuEntropy : UdonSharpBehaviour
         }
         syntaxMaterial.SetTexture("_Prefix", prefixA);
         VRCGraphics.Blit(Texture2D.blackTexture, countTexture, syntaxMaterial, 2);
-        waitingForCount = readbackPending = true;
+        readbackStage = SyntaxCountStage;
+        readbackPending = true;
         VRCAsyncGPUReadback.Request(countTexture, 0, TextureFormat.RGBA32, this);
     }
 
@@ -113,21 +115,26 @@ public class AvifGpuEntropy : UdonSharpBehaviour
         rangeMaterial.SetTexture("_Counts", rangeCount);
         VRCGraphics.Blit(Texture2D.blackTexture, rangeCheckpoints, rangeMaterial, 0);
         VRCGraphics.Blit(Texture2D.blackTexture, rangeCount, rangeMaterial, 1);
-        SubmitOutput(rangeOutput ? rangeOutput.width * rangeOutput.height * 4 : 131072);
+        // The assembler's first pixel contains the exact container length; no output reservation is needed.
+        outputLengthTexture = CodecBuffers.Surface(outputLengthTexture, 1, 1, RenderTextureFormat.ARGB32);
+        VRCGraphics.Blit(Texture2D.blackTexture, outputLengthTexture, rangeMaterial, 3);
+        readbackStage = OutputLengthStage;
+        readbackPending = true;
+        VRCAsyncGPUReadback.Request(outputLengthTexture, 0, TextureFormat.RGBA32, this);
     }
 
-    private void SubmitOutput(int capacity)
+    private void SubmitOutput()
     {
-        int rows = (capacity + 32767) / 32768;
-        rangeDigits = CodecBuffers.Surface(rangeDigits, 8192, rows, RenderTextureFormat.ARGBFloat);
-        rangeOutput = CodecBuffers.Surface(rangeOutput, 8192, rows, RenderTextureFormat.ARGB32);
+        rangeDigits = CodecBuffers.EncodedOutput(rangeDigits, encodedLength, RenderTextureFormat.ARGBFloat);
+        rangeOutput = CodecBuffers.EncodedOutput(rangeOutput, encodedLength, RenderTextureFormat.ARGB32);
+        rangeMaterial.SetInt("_ByteTextureWidth", rangeOutput.width);
         rangeMaterial.SetTexture("_Digits", rangeDigits);
         VRCGraphics.Blit(Texture2D.blackTexture, rangeDigits, rangeMaterial, 2);
         VRCGraphics.Blit(Texture2D.blackTexture, rangeOutput, rangeMaterial, 3);
         int readbackBytes = rangeOutput.width * rangeOutput.height * 4;
         if (imageReadback == null || imageReadback.Length != readbackBytes)
             imageReadback = new byte[readbackBytes];
-        waitingForCount = false;
+        readbackStage = ImageStage;
         readbackPending = true;
         VRCAsyncGPUReadback.Request(rangeOutput, 0, TextureFormat.RGBA32, this);
     }
@@ -144,15 +151,23 @@ public class AvifGpuEntropy : UdonSharpBehaviour
     {
         readbackPending = false;
         if (!busy) return;
-        byte[] bytes = waitingForCount ? countReadback : imageReadback;
+        byte[] bytes = readbackStage == ImageStage ? imageReadback : countReadback;
         if (request.hasError || !request.TryGetData(bytes))
         {
             busy = false;
             error = "AVIF GPU readback failed.";
             return;
         }
+        if (readbackStage == ImageStage)
+        {
+            result = new byte[encodedLength];
+            Array.Copy(bytes, CodecBuffers.LengthPrefixBytes, result, 0, encodedLength);
+            busy = false;
+            complete = true;
+            return;
+        }
         int length = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24);
-        if (waitingForCount)
+        if (readbackStage == SyntaxCountStage)
         {
             // SM5 texture width (16384) bounds two RGBA checkpoint records per 2048 tokens.
             if (length < 1 || length > (16384 / 2 - 1) * 2048)
@@ -164,24 +179,19 @@ public class AvifGpuEntropy : UdonSharpBehaviour
             EncodeRecords(length);
             return;
         }
-        if (length > bytes.Length - 4)
-        {
-            // Grow from the GPU's actual length; coefficients, CDFs and range checkpoints are reused.
-            SubmitOutput(length + 4);
-            return;
-        }
-        busy = false;
-        result = new byte[length];
-        Array.Copy(bytes, 4, result, 0, length);
-        complete = true;
+        encodedLength = length;
+        SubmitOutput();
     }
 
     private void OnDestroy()
     {
-        RenderTexture[] textures = { prefixA,        prefixB,          countTexture,   events,
-                                     sortedA,        sortedB,          cdfCheckpoints, intervals,
-                                     resolvedTokens, rangeCheckpoints, rangeCount,     rangeDigits,
-                                     rangeOutput };
+        RenderTexture[] textures = { prefixA,        prefixB,
+                                     countTexture,   events,
+                                     sortedA,        sortedB,
+                                     cdfCheckpoints, intervals,
+                                     resolvedTokens, rangeCheckpoints,
+                                     rangeCount,     rangeDigits,
+                                     rangeOutput,    outputLengthTexture };
         CodecBuffers.Release(textures);
     }
 }

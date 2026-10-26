@@ -106,12 +106,6 @@ public class AvifGpuTransform : UdonSharpBehaviour
     private void Update()
     {
         if (!busy) return;
-        if (Time.realtimeSinceStartup - startedAt > 30)
-        {
-            CancelTransform();
-            error = "AV1 GPU processing timed out.";
-            return;
-        }
         float before = Time.realtimeSinceStartup;
         for (int i = 0; i < diagonalsPerFrame && diagonal < diagonals; i++, diagonal++)
         {

@@ -4,7 +4,11 @@ int AomCost(int i){return (int)_AomCosts.Load(int3(i,0,0)).r;}
 int AomEobCost(int i){return (int)_AomCosts.Load(int3(i,1,0)).r;}
 static const int Aom_scan[64]={0,8,1,2,9,16,24,17,10,3,4,11,18,25,32,40,33,26,19,12,5,6,13,20,27,34,41,48,56,49,42,35,28,21,14,7,15,22,29,36,43,50,57,58,51,44,37,30,23,31,38,45,52,59,60,53,46,39,47,54,61,62,55,63};
 static const int Aom_nzOffsets[64]={0,1,6,6,21,21,21,21,1,6,6,21,21,21,21,21,6,6,21,21,21,21,21,21,6,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21,21};
-static const float _RdScale=.07;int _QuantUvDc,_QuantUvAc;
+// Profile tuning for prediction screening and chroma RDO: rate weight is quantizer-step squared * 0.07.
+// Table-based rate costs additionally use 1/512-bit units. This is not a quality percentage or AV1 requirement.
+// The luma coefficient trellis below uses a separate libaom-derived multiplier.
+static const float _RdScale=.07;
+int _QuantUvDc,_QuantUvAc;
 int StepBase(int plane,int local){return plane==0?(local==0?_QuantDc:_QuantAc):(local==0?_QuantUvDc:_QuantUvAc);}
 
 int StepAt(int plane,int local){return StepBase(plane,local);}

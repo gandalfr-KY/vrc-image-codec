@@ -14,7 +14,7 @@ Shader "VrcAvif/Range coding"
 // Restricted AV1 range coding, AOM-derived arithmetic. BSD-2-Clause + PATENTS.
 // Save state every 2048 symbols; each output word replays only its suffix.
 Texture2D<float4> _Tokens, _Headers, _Digits, _Counts, _Checkpoints;
-int _TokenCount, _QuantIndex, _QuantBit;
+int _TokenCount, _QuantIndex, _QuantBit, _ByteTextureWidth;
 float4 _HeaderSizes, _HeaderPatch;
 static uint2 low;
 static uint range;
@@ -154,7 +154,7 @@ float4 CountBytes(v2f_img pixel) : SV_Target
 float4 WriteDigits(v2f_img pixel) : SV_Target
 {
     uint2 id = (uint2)pixel.pos.xy;
-    int target = ((int)id.y * 8192 + (int)id.x) * 4;
+    int target = ((int)id.y * _ByteTextureWidth + (int)id.x) * 4;
     int length = (int)_Counts.Load(int3(0, 0, 0)).r;
     if (target >= length) return 0;
     int count = _TokenCount;
@@ -180,7 +180,7 @@ float4 WriteDigits(v2f_img pixel) : SV_Target
 uint ReadDigit(int index)
 {
     int wordIndex = index / 4;
-    float4 word = _Digits.Load(int3(wordIndex % 8192, wordIndex / 8192, 0));
+    float4 word = _Digits.Load(int3(wordIndex % _ByteTextureWidth, wordIndex / _ByteTextureWidth, 0));
     return (uint)round(word[index % 4]);
 }
 uint SelectCarry(int3 value, int at)
@@ -228,7 +228,7 @@ uint AssembleByte(int at, int length, int page, int headerLength)
 float4 WriteAvif(v2f_img pixel) : SV_Target
 {
     uint2 id = (uint2)pixel.pos.xy;
-    int word = (int)id.y * 8192 + (int)id.x, length = (int)_Counts.Load(int3(0, 0, 0)).r;
+    int word = (int)id.y * _ByteTextureWidth + (int)id.x, length = (int)_Counts.Load(int3(0, 0, 0)).r;
     int payload = length + (int)_HeaderPatch.w, page = payload >= 2097152 ? 3 : payload >= 16384 ? 2 : payload >= 128 ? 1 : 0;
     int headerLength = (int)_HeaderSizes[page], total = headerLength + length;
     if (word == 0) return float4(total & 255, (total >> 8) & 255, (total >> 16) & 255, (total >> 24) & 255) / 255.;

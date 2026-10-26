@@ -5,6 +5,18 @@ namespace VrcImageCodec
 // Allocation policy shared by codecs; callers retain ownership and release their own buffers.
 public static class CodecBuffers
 {
+    // Byte streams are packed into RGBA pixels; only the final row may have padding.
+    public const int ByteTextureColumns = 1024;
+    public const int LengthPrefixBytes = 4;
+
+    public static RenderTexture EncodedOutput(RenderTexture previous, int encodedBytes,
+                                              RenderTextureFormat format)
+    {
+        // One little-endian uint32 length prefix, packed into four-byte RGBA pixels.
+        int pixels = (encodedBytes + LengthPrefixBytes + 3) / 4;
+        int columns = Mathf.Min(ByteTextureColumns, pixels);
+        return Surface(previous, columns, (pixels + columns - 1) / columns, format);
+    }
     public static void Release(RenderTexture[] textures)
     {
         for (int i = 0; i < textures.Length; i++)

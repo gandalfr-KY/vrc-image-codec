@@ -8,7 +8,7 @@ Shader "VrcAvif/JPEG"
 #include "CodecCommon.hlsl"
         #include "JpegTables.hlsl"
         Texture2D<float4> _Input, _Work, _Coefficients, _Prefix, _Bytes, _Starts, _Huffman, _RestartPrefix, _Header;
-        int _Width, _Height, _Cols, _Rows, _Count, _Quality, _Stride, _Length, _Linear, _Subsampled;
+        int _Width, _Height, _Cols, _Rows, _Count, _Quality, _Stride, _Length, _Linear, _Subsampled, _OutputWidth;
         // Linear buffers use 1024 pixels and store four bytes per pixel.
         int Index(v2f_img i) { return (int)i.pos.y * 1024 + (int)i.pos.x; }
         uint Byte(int index)
@@ -165,7 +165,7 @@ int Quant(int index, int component)
 
         float4 DirectAssemble(v2f_img i) : SV_Target
         {
-            int pixel = Index(i), total = (int)CodecCell(_Prefix,_Count-1).r;
+            int pixel = (int)i.pos.y * _OutputWidth + (int)i.pos.x, total = (int)CodecCell(_Prefix,_Count-1).r;
             int length = HeaderSize + total + 2;
             if (pixel == 0) return CodecBytes(length);
             int at = (pixel-1)*4;
