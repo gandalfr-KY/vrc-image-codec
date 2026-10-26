@@ -1,6 +1,5 @@
 using UdonSharp;
 using UnityEngine;
-using VRC.SDK3.Rendering;
 using VRC.SDKBase;
 
 namespace TernaryStars
@@ -14,10 +13,11 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
     private const int PredictionPass = 0, QuantizePass = 1, ReconstructPass = 2, PackPass = 3;
     private const int CflPass = 4, OptimizePass = 5, CandidatePass = 6, UvCandidatePass = 7, UvModePass = 8;
     private const int CdefDirectionPass = 9, CdefFilterPass = 10, PredictionCostPass = 11, ShortlistPass = 12;
-    private const int PrepareSourcePass = 13, ChromaOptimizePass = 14, InverseRowsPass = 15, CflCostsPass = 16;
+    private const int PrepareSourcePass = 13, ChromaOptimizePass = 14, InverseRowsPass = 15,
+                      CflCostsPass = 16;
     public Material material;
-    public RenderTexture modeTexture, cflTexture, optimizedTexture, candidateTexture, uvCandidates, uvModeTexture,
-        modeCosts, shortlist;
+    public RenderTexture modeTexture, cflTexture, optimizedTexture, candidateTexture, uvCandidates,
+        uvModeTexture, modeCosts, shortlist;
     public RenderTexture quantA, reconA, reconB, packedTexture;
     public RenderTexture inputTexture, sourceYuvTexture;
     public int width = 640, height = 360;
@@ -26,36 +26,31 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
     [HideInInspector]
     public int quantDc, quantAc;
     [HideInInspector]
-    public bool busy, complete, readbackPending;
+    public bool busy, complete;
     [HideInInspector]
     public string error = "";
     [HideInInspector]
-    public byte[] result;
-    [HideInInspector]
-    public float elapsedSeconds, submitCpuSeconds, maxStepMs, readbackSeconds;
+    public float elapsedSeconds, submitCpuSeconds, maxStepMs;
     private int diagonal, diagonals;
-    private float startedAt, readbackAt;
+    private float startedAt;
 
     public void BeginTransform()
     {
-        if (readbackPending)
-        {
-            error = "Previous AV1 GPU readback is still pending.";
-            return;
-        }
         CancelTransform();
         int cols = width / 8, rows = height / 8;
-        if (!material || !inputTexture || !sourceYuvTexture || !quantA || !reconA || !reconB || !packedTexture ||
-            !modeTexture || !cflTexture || !optimizedTexture || !candidateTexture || !uvCandidates || !uvModeTexture ||
-            !modeCosts || !shortlist || width < 16 || height < 16 || width > 1920 || height > 1920 ||
-            width * height > 2073600 || width % 8 != 0 || height % 8 != 0 || quantDc <= 0 || quantAc <= 0 ||
-            diagonalsPerFrame < 1 || diagonalsPerFrame > 16 || sourceYuvTexture.width != width ||
-            sourceYuvTexture.height != height * 3 / 2 || quantA.width != cols * 8 || quantA.height != rows * 12 ||
-            reconA.width != quantA.width || reconA.height != quantA.height || reconB.width != quantA.width ||
+        if (!material || !inputTexture || !sourceYuvTexture || !quantA || !reconA || !reconB ||
+            !packedTexture || !modeTexture || !cflTexture || !optimizedTexture || !candidateTexture ||
+            !uvCandidates || !uvModeTexture || !modeCosts || !shortlist || width < 16 || height < 16 ||
+            width > 1920 || height > 1920 || width * height > 2073600 || width % 8 != 0 || height % 8 != 0 ||
+            quantDc <= 0 || quantAc <= 0 || diagonalsPerFrame < 1 || diagonalsPerFrame > 16 ||
+            sourceYuvTexture.width != width || sourceYuvTexture.height != height * 3 / 2 ||
+            quantA.width != cols * 8 || quantA.height != rows * 12 || reconA.width != quantA.width ||
+            reconA.height != quantA.height || reconB.width != quantA.width ||
             reconB.height != quantA.height || inputTexture.width != width || inputTexture.height != height ||
             modeTexture.width != cols || modeTexture.height != rows || cflTexture.width != cols ||
-            cflTexture.height != rows || optimizedTexture.width != cols * 16 || optimizedTexture.height != rows ||
-            candidateTexture.width != cols * 40 || candidateTexture.height != rows || uvCandidates.width != cols * 8 ||
+            cflTexture.height != rows || optimizedTexture.width != cols * 16 ||
+            optimizedTexture.height != rows || candidateTexture.width != cols * 40 ||
+            candidateTexture.height != rows || uvCandidates.width != cols * 8 ||
             uvCandidates.height != rows || uvModeTexture.width != cols || uvModeTexture.height != rows ||
             modeCosts.width != cols * 51 || modeCosts.height != rows || shortlist.width != cols * 2 ||
             shortlist.height != rows || packedTexture.width != 512 ||
@@ -69,7 +64,7 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
             return;
         }
         startedAt = Time.realtimeSinceStartup;
-        elapsedSeconds = submitCpuSeconds = maxStepMs = readbackSeconds = 0;
+        elapsedSeconds = submitCpuSeconds = maxStepMs = 0;
         diagonal = 0;
         diagonals = cols + 2 * rows - 2;
         material.SetVector("_PhotoSize", new Vector4(width, height, cols, rows));
@@ -102,20 +97,16 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
         busy = false;
         complete = false;
         error = "";
-        result = null;
     }
     private void Update()
     {
-        if (!busy)
-            return;
+        if (!busy) return;
         if (Time.realtimeSinceStartup - startedAt > 30)
         {
             CancelTransform();
             error = "AV1 GPU processing timed out.";
             return;
         }
-        if (readbackPending)
-            return;
         float before = Time.realtimeSinceStartup;
         for (int i = 0; i < diagonalsPerFrame && diagonal < diagonals; i++, diagonal++)
         {
@@ -141,9 +132,9 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
             VRCGraphics.Blit(Texture2D.blackTexture, modeTexture, material, CdefDirectionPass);
             VRCGraphics.Blit(reconA, reconB, material, CdefFilterPass);
             VRCGraphics.Blit(quantA, packedTexture, material, PackPass);
-            readbackPending = true;
-            readbackAt = Time.realtimeSinceStartup;
-            VRCAsyncGPUReadback.Request(packedTexture, 0, TextureFormat.RGBA32, this);
+            elapsedSeconds = Time.realtimeSinceStartup - startedAt;
+            busy = false;
+            complete = true;
         }
         float work = Time.realtimeSinceStartup - before;
         submitCpuSeconds += work;
@@ -157,27 +148,6 @@ public class TernaryAvifGpuTransform : UdonSharpBehaviour
         VRCGraphics.Blit(Texture2D.blackTexture, quantA, material, QuantizePass);
         VRCGraphics.Blit(Texture2D.blackTexture, optimizedTexture, material, InverseRowsPass);
         VRCGraphics.Blit(Texture2D.blackTexture, reconA, material, ReconstructPass);
-    }
-    public override void OnAsyncGpuReadbackComplete(VRCAsyncGPUReadbackRequest request)
-    {
-        if (!readbackPending)
-            return;
-        readbackPending = false;
-        if (!busy)
-            return;
-        result = new byte[packedTexture.width * packedTexture.height * 4];
-        if (request.hasError || !request.TryGetData(result))
-        {
-            CancelTransform();
-            error = "AV1 coefficient readback failed.";
-            return;
-        }
-        readbackSeconds = Time.realtimeSinceStartup - readbackAt;
-        elapsedSeconds = Time.realtimeSinceStartup - startedAt;
-        busy = false;
-        complete = true;
-        Debug.Log("[AV1GPU] transform + asynchronous readback " + elapsedSeconds + "s, " + result.Length +
-                  " bytes; submit CPU " + submitCpuSeconds + "s");
     }
 }
 }

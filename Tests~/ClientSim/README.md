@@ -1,14 +1,12 @@
-# Frame-scheduled ClientSim trial
+# Production encoder ClientSim trial
 
-Use an isolated Unity 2022.3 project with this codec and the Worlds SDK installed. Save the current scene first. This trial creates a separate scene and runs compiled Udon through its normal Update callbacks; its C# observer only measures results. It does not log in, build, upload, or launch VRChat.
+Use `Tools~/check-codec.py <UnityProject> --prepare`, refresh Unity, then use `--run`. See Tests~/README.md for the complete workflow. Save the scene first. The suite creates a separate scene and runs the actual production Udon/GPU implementation. Its native observer supplies fixtures and compares output only. It does not log in, build, upload or launch VRChat.
 
-1. Copy `CodecRealtimeMonitor.cs` into `Assets/CodecRealtime/` and `CodecRealtimeSetup.cs` into `Assets/Editor/`.
-2. Put a representative photo at `Assets/CodecRealtime/Source.png` and refresh Unity.
-3. Create `Logs/CodecRealtime/prepare.request` containing `prepare`.
+The first fixture is cancelled during readback and then reused. Subsequent tests compare all AVIF bytes with stored references. A final full capture includes the transform and AVIF assembly. `done.txt` indicates success; `error.txt` records a failed check. `stopped.txt` confirms that Play ended and settings/scene were restored.
 
-The trial measures Full HD, Q60 at requested 60/30/90fps, each with Normal (2ms) and Fast (4ms) scheduling. It records actual baseline FPS, stage wall time, frame mean/p95/max, codec CPU-step time and Unity Editor memory snapshots in `results.json`. Check `progress.txt`, `done.txt` or `error.txt`. Avoid using the Editor during a measurement.
+The 60fps cap and Fast GPU scheduling are fixed for this test. Reported elapsed times are ClientSim measurements, not VRChat client measurements. Actual FPS is recorded through frame intervals. Avoid interacting with Unity during timing.
 
-All AVIF outputs must be byte-identical. Each case saves an AVIF, an RGB PNG and the reconstructed YUV atlas. Validation-only GPU readback happens after the decode timer stops. Input controls are intentionally disabled; a fixed camera is used, including in projects with the legacy input backend. This is a codec trial, not an interaction or real-client test. Unity Editor memory and frame-time outliers cannot be interpreted as standalone VRChat memory or FPS.
+The decoder has a separate GPU reconstruction trial documented in Tests~/README.md. Tests~ is excluded from the installed runtime package.
 
 The trial retains the encoder's camera-input `flipSourceY=true`. A PNG supplied directly is therefore vertically flipped in the encoded image. This still provides a consistent corpus for scheduling comparisons; set `encoder.gpuTransform.flipSourceY=false` in the setup before copying the proxy if testing the original PNG orientation instead. This setting does not change decoder orientation rules.
 

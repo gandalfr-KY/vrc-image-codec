@@ -10,6 +10,9 @@ The upstream BSD license and AOMedia Patent License 1.0 are reproduced in
 the port and shaders. The port adds Udon scheduling, GPU transformation and
 readback, context packing, a bounded AVIF wrapper and camera integration.
 It is a restricted intra encoder, not SVT-AV1 or a hardware AV1 encoder.
+The GPU syntax, exact adaptive-CDF scheduling, gather merge and GPU container
+assembly are project implementations. Range-coder arithmetic retains the AOM/tinyavif
+attribution above. No CUDA or sorting-library source is embedded.
 The upstream project describes itself as a proof of concept; this release makes
 no claim to match production encoders in compression efficiency or AV1 coverage.
 

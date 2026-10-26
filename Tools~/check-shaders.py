@@ -29,7 +29,7 @@ def read(ptr):
 
 
 failed = False
-for shader in ["Av1Intra.shader"] if sys.argv[1:] else ["Av1Intra.shader"]:
+for shader in ["Av1Intra.shader"] if sys.argv[1:] else sorted(p.name for p in S.glob("*.shader")):
     text = (S / shader).read_text(encoding="utf-8")
     source = text.split("CGINCLUDE", 1)[1].split("ENDCG", 1)[0]
     source = source.replace(

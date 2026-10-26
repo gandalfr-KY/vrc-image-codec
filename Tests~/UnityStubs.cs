@@ -84,61 +84,6 @@ public static class Debug
     }
 }
 }
-namespace TernaryStars
-{
-public class TernaryAvifGpuTransform : UdonSharp.UdonSharpBehaviour
-{
-    public UnityEngine.Material material = new UnityEngine.Material();
-    public bool busy, complete, readbackPending;
-    public int width, height, quantDc, quantAc;
-    public byte[] result;
-    public string error;
-    public void BeginTransform()
-    {
-        busy = true;
-        complete = false;
-    }
-    public void CancelTransform()
-    {
-        busy = false;
-        complete = false;
-    }
-}
-}
-class Program
-{
-    static int Main(string[] args)
-    {
-        var e = new TernaryStars.TernaryAvifEncoder();
-        e.width = int.Parse(args[1]);
-        e.height = int.Parse(args[2]);
-        e.quality = int.Parse(args[4]);
-        e.disableCdfUpdate = args.Length > 6 && args[6] == "frozen";
-        e.frameBudgetMs = float.Parse(args[5], System.Globalization.CultureInfo.InvariantCulture);
-        e.gpuTransform = new TernaryStars.TernaryAvifGpuTransform();
-        if (args.Length > 6 && args[6] == "missing")
-            e.gpuTransform = null;
-        e.BeginEncoding();
-        if (!e.busy)
-        {
-            Console.Error.WriteLine(e.error);
-            return 1;
-        }
-        e.gpuTransform.result = File.ReadAllBytes(args[0]);
-        e.gpuTransform.busy = false;
-        e.gpuTransform.complete = true;
-        while (e.busy)
-            e.StepEncoding();
-        if (!e.complete)
-        {
-            Console.Error.WriteLine(e.error);
-            return 1;
-        }
-        File.WriteAllBytes(args[3], e.resultAvif);
-        return 0;
-    }
-}
-
 // Native reference harness only; the actual Udon trial uses Unity's vector API.
 namespace UnityEngine
 {
