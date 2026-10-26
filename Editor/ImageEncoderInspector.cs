@@ -72,8 +72,10 @@ public class ImageEncoderInspector : UnityEditor.Editor
         if (sizes.Length == 0)
         {
             EditorGUILayout.LabelField("Resolution", input ? "No compatible size" : "Assign an input first");
-            return input ? "No supported resolution keeps this aspect ratio. For AVIF, use JPEG or change " +
-                               "the input RenderTexture."
+            string inputError = ImageEncoderSetup.InputError(input, format);
+            if (inputError != "") return inputError;
+            return input ? "No supported resolution keeps this aspect ratio. Use an input RenderTexture " +
+                               "with a standard aspect ratio, such as 16:9, 4:3 or 1:1."
                          : "";
         }
         int selected = Array.FindIndex(sizes, size => size.x == width.intValue && size.y == height.intValue);
@@ -92,6 +94,11 @@ public class ImageEncoderInspector : UnityEditor.Editor
                                          Array.ConvertAll(sizes, size => size.x + " × " + size.y));
         width.intValue = sizes[selected].x;
         height.intValue = sizes[selected].y;
+        if (sizes.Length == 1)
+            EditorGUILayout.HelpBox(
+                "Only one resolution is available. For more choices, use a larger input RenderTexture " +
+                    "with a standard aspect ratio, such as 16:9, 4:3 or 1:1.",
+                MessageType.Warning);
         return "";
     }
 }
@@ -105,7 +112,7 @@ public abstract class CodecImplementationInspector : UnityEditor.Editor
         EditorGUILayout.HelpBox(
             target is AvifDecoder || target is JpegDecoder
                 ? "Pass encoded bytes through the decoder API. Resolution and sampling are read from the " +
-                  "image."
+                      "image."
                 : "Configured automatically. Use Tools > Image Codec > Create encoder for image settings.",
             MessageType.Info);
     }

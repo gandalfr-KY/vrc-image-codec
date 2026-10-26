@@ -22,9 +22,19 @@ public static class ImageEncoderSetup
         EditorSceneManager.MarkSceneDirty(root.scene);
     }
 
+    public static string InputError(RenderTexture input, ImageEncodingFormat format)
+    {
+        if (!input || format != ImageEncodingFormat.AVIF) return "";
+        if (input.width < 16 || input.height < 16)
+            return "Set both dimensions of the input RenderTexture to at least 16 pixels for AVIF.";
+        if (input.width % 8 != 0 || input.height % 8 != 0)
+            return "Set both dimensions of the input RenderTexture to multiples of 8 for AVIF.";
+        return "";
+    }
+
     public static Vector2Int[] Resolutions(RenderTexture input, ImageEncodingFormat format)
     {
-        if (!input) return new Vector2Int[0];
+        if (!input || InputError(input, format) != "") return new Vector2Int[0];
         int a = input.width, b = input.height;
         while (b != 0)
         {
@@ -60,7 +70,9 @@ public static class ImageEncoderSetup
 
     public static void Configure(ImageEncoder encoder)
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode || encoder.ConfigurationError() != "") return;
+        if (EditorApplication.isPlayingOrWillChangePlaymode ||
+            InputError(encoder.inputTexture, encoder.format) != "" || encoder.ConfigurationError() != "")
+            return;
         Undo.RecordObject(encoder, "Configure image encoder");
         if (encoder.format == ImageEncodingFormat.AVIF)
         {
