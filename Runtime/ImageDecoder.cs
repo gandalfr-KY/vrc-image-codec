@@ -7,60 +7,66 @@ namespace VrcImageCodec
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class ImageDecoder : UdonSharpBehaviour
 {
-    [HideInInspector]
-    public byte[] inputBytes;
-    [HideInInspector]
-    public RenderTexture resultTexture;
-    [HideInInspector]
-    public bool busy, complete, readbackPending;
-    [HideInInspector]
-    public string error = "";
-    [HideInInspector]
-    public AvifDecoder avifDecoder;
-    [HideInInspector]
-    public JpegDecoder jpegDecoder;
+    [SerializeField, HideInInspector]
+    private AvifDecoder avifDecoder;
+    [SerializeField, HideInInspector]
+    private JpegDecoder jpegDecoder;
+    private RenderTexture resultTexture;
+    private bool busy, complete, readbackPending;
+    private string error = "";
     private bool decodingJpeg;
 
-    public void BeginDecoding()
+    public bool IsBusy => busy;
+    public bool IsComplete => complete;
+    public bool HasPendingReadback => readbackPending;
+    /// <summary>A decoder-owned texture. Blit a copy before decoding another image to retain it.</summary>
+    public RenderTexture ResultTexture => resultTexture;
+    public string LastError => error;
+
+    /// <summary>Starts decoding this library's AVIF/JPEG profile. True means accepted, not
+    /// completed.</summary> <remarks>Keep bytes unchanged until processing and pending GPU readbacks
+    /// finish.</remarks>
+    public bool TryBeginDecoding(byte[] bytes)
     {
         RefreshReadbackState();
-        if (busy || readbackPending) return;
+        if (busy || readbackPending) return false;
         complete = false;
         resultTexture = null;
         error = "";
-        if (inputBytes == null || inputBytes.Length < 2)
+        if (bytes == null || bytes.Length < 2)
         {
             error = "Provide complete AVIF or JPEG image bytes.";
-            return;
+            return false;
         }
-        decodingJpeg = inputBytes[0] == 255 && inputBytes[1] == 216;
-        if (!decodingJpeg && !(inputBytes.Length >= 8 && inputBytes[4] == 102 && inputBytes[5] == 116 &&
-                               inputBytes[6] == 121 && inputBytes[7] == 112))
+        decodingJpeg = bytes[0] == 255 && bytes[1] == 216;
+        if (!decodingJpeg &&
+            !(bytes.Length >= 8 && bytes[4] == 102 && bytes[5] == 116 && bytes[6] == 121 && bytes[7] == 112))
         {
             error = "The image format is not supported. Provide AVIF or JPEG bytes.";
-            return;
+            return false;
         }
         // Signature selects the implementation; its parser owns full profile validation.
         if (!avifDecoder || !jpegDecoder)
         {
             error = "Create a configured decoder using Tools > Image Codec > Create decoder.";
-            return;
+            return false;
         }
         if (decodingJpeg)
         {
-            jpegDecoder.inputJpeg = inputBytes;
+            jpegDecoder.inputJpeg = bytes;
             jpegDecoder.BeginDecoding();
             busy = jpegDecoder.busy;
             error = jpegDecoder.error;
         }
         else
         {
-            avifDecoder.inputAvif = inputBytes;
+            avifDecoder.inputAvif = bytes;
             avifDecoder.BeginDecoding();
             busy = avifDecoder.busy;
             error = avifDecoder.error;
         }
         RefreshReadbackState();
+        return busy;
     }
 
     private void LateUpdate()

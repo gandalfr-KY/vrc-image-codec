@@ -16,33 +16,62 @@ public enum ImageEncodingFormat
 public class ImageEncoder : UdonSharpBehaviour
 {
     public const int MaximumDimension = 1920, MaximumPixels = 1920 * 1080;
-    public ImageEncodingFormat format;
-    public bool subsampleChroma = true;
-    public RenderTexture inputTexture;
-    public int width = 640, height = 360, quality = 60;
-    [HideInInspector]
-    public AvifEncoder avifEncoder;
-    [HideInInspector]
-    public JpegEncoder jpegEncoder;
-    [HideInInspector]
-    public bool busy, complete, readbackPending;
-    [HideInInspector]
-    public byte[] resultBytes;
-    [HideInInspector]
-    public string error = "";
+    [SerializeField]
+    private ImageEncodingFormat format;
+    [SerializeField]
+    private bool subsampleChroma = true;
+    [SerializeField]
+    private RenderTexture inputTexture;
+    [SerializeField]
+    private int width = 640, height = 360, quality = 60;
+    [SerializeField, HideInInspector]
+    private AvifEncoder avifEncoder;
+    [SerializeField, HideInInspector]
+    private JpegEncoder jpegEncoder;
+    private bool busy, complete, readbackPending;
+    private byte[] resultBytes;
+    private string error = "";
     private ImageEncodingFormat activeFormat;
+    private RenderTexture snapshot;
 
-    public string ConfigurationError()
+    public ImageEncodingFormat Format => format;
+    public bool SubsampleChroma => subsampleChroma;
+    public int Width => width;
+    public int Height => height;
+    public RenderTexture InputTexture => inputTexture;
+    public int Quality
     {
-        if (!inputTexture) return "Assign an input RenderTexture.";
+        get => quality;
+        set => quality = value;
+    }
+    public bool IsBusy => busy;
+    public bool IsComplete => complete;
+    public bool HasPendingReadback => readbackPending;
+    /// <summary>A new array for each completed image. Retained arrays are not reused or modified.</summary>
+    public byte[] ResultBytes => resultBytes;
+    public string LastError => error;
+
+    public string GetConfigurationError()
+    {
+        return ValidateInput(inputTexture);
+    }
+
+    private string ValidateInput(RenderTexture source)
+    {
+        if (!source) return "Assign an input RenderTexture.";
+        if (source.width < 16 || source.height < 16)
+            return "Set both dimensions of the input RenderTexture to at least 16 pixels.";
+        if (source.width % 8 != 0 || source.height % 8 != 0)
+            return "Set both dimensions of the input RenderTexture to multiples of 8.";
         if (quality < 1 || quality > 100) return "Quality must be between 1 and 100.";
-        if (width < 1 || height < 1 || width > MaximumDimension || height > MaximumDimension ||
+        if (width < 16 || height < 16 || width > MaximumDimension || height > MaximumDimension ||
             width * height > MaximumPixels)
-            return "Resolution must fit within 1920 pixels per side and 2,073,600 pixels in total.";
-        if (format == ImageEncodingFormat.AVIF &&
-            (width < 16 || height < 16 || width % 8 != 0 || height % 8 != 0))
-            return "AVIF requires dimensions of at least 16 pixels, in multiples of 8.";
-        if (width * inputTexture.height != height * inputTexture.width)
+            return "Resolution must be at least 16 pixels per side, at most 1920 pixels per side, " +
+                   "and at most 2,073,600 pixels in total.";
+        if (width % 8 != 0 || height % 8 != 0) return "Set both output dimensions to multiples of 8.";
+        if (format != ImageEncodingFormat.AVIF && format != ImageEncodingFormat.JPEG)
+            return "Choose AVIF or JPEG.";
+        if ((long)width * source.height != (long)height * source.width)
             return "Resolution must keep the input RenderTexture's aspect ratio. The image will not be " +
                    "stretched or cropped.";
         return "";
@@ -50,12 +79,19 @@ public class ImageEncoder : UdonSharpBehaviour
 
     public void BeginEncoding()
     {
+        TryBeginEncoding(inputTexture);
+    }
+
+    /// <summary>Snapshots the source and starts encoding. True means accepted, not completed.</summary>
+    /// <remarks>A busy/readback rejection preserves the current operation and its result/error.</remarks>
+    public bool TryBeginEncoding(RenderTexture source)
+    {
         RefreshReadbackState();
-        if (busy || readbackPending) return;
+        if (busy || readbackPending) return false;
         complete = false;
         resultBytes = null;
-        error = ConfigurationError();
-        if (error != "") return;
+        error = ValidateInput(source);
+        if (error != "") return false;
         activeFormat = format;
         RenderTexture destination;
         if (activeFormat == ImageEncodingFormat.AVIF)
@@ -64,7 +100,7 @@ public class ImageEncoder : UdonSharpBehaviour
                 avifEncoder.subsampleChroma != subsampleChroma)
             {
                 error = "Configure the encoder in its Inspector before encoding.";
-                return;
+                return false;
             }
             destination = avifEncoder.gpuTransform.inputTexture;
             avifEncoder.quality = quality;
@@ -75,25 +111,30 @@ public class ImageEncoder : UdonSharpBehaviour
                 jpegEncoder.subsampleChroma != subsampleChroma)
             {
                 error = "Configure the encoder in its Inspector before encoding.";
-                return;
+                return false;
             }
             destination = (RenderTexture)jpegEncoder.inputTexture;
             jpegEncoder.quality = quality;
         }
-        if (inputTexture != destination) VRCGraphics.Blit(inputTexture, destination);
+        // Serialized layout assets can be shared by prefab instances; image snapshots cannot.
+        if (!snapshot) snapshot = CodecBuffers.AllocateLike(destination);
+        if (source != snapshot) VRCGraphics.Blit(source, snapshot);
         if (activeFormat == ImageEncodingFormat.AVIF)
         {
+            avifEncoder.gpuTransform.inputTexture = snapshot;
             avifEncoder.BeginEncoding();
             busy = avifEncoder.busy;
             error = avifEncoder.error;
         }
         else
         {
+            jpegEncoder.inputTexture = snapshot;
             jpegEncoder.BeginEncoding();
             busy = jpegEncoder.busy;
             error = jpegEncoder.error;
         }
         RefreshReadbackState();
+        return busy;
     }
 
     private void LateUpdate()
@@ -131,6 +172,11 @@ public class ImageEncoder : UdonSharpBehaviour
     {
         readbackPending = (avifEncoder && avifEncoder.gpuEntropy && avifEncoder.gpuEntropy.readbackPending) ||
                           (jpegEncoder && jpegEncoder.readbackPending);
+    }
+
+    private void OnDestroy()
+    {
+        CodecBuffers.Release(new RenderTexture[] { snapshot });
     }
 }
 }

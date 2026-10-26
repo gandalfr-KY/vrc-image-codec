@@ -19,7 +19,7 @@ files = sorted(
     if path.is_file()
     and not any(
         part.startswith(".")
-        or part in ["release", "test-results", "Tests~", "Tools~", "__pycache__"]
+        or part in ["release", "test-results", "__pycache__"]
         for part in path.relative_to(ROOT).parts
     )
 )
@@ -38,7 +38,7 @@ def add(archive, name, content):
 with tarfile.open(release / (name + ".unitypackage"), "w:gz") as package:
     for path in files:
         relative = path.relative_to(ROOT).as_posix()
-        if not relative.endswith(".meta") or relative.startswith("Samples~/"):
+        if not relative.endswith(".meta") or relative.startswith(("Samples~/", "Tests~/", "Tools~/")):
             continue
         guid = re.search(
             r"^guid: ([a-f0-9]{32})$", path.read_text(encoding="utf-8"), re.M
@@ -56,12 +56,21 @@ with tarfile.open(release / (name + ".unitypackage"), "w:gz") as package:
 with tarfile.open(release / (name + "-sample.unitypackage"), "w:gz") as package:
     for path in files:
         relative = path.relative_to(ROOT).as_posix()
-        if not relative.endswith(".meta") or not (relative.startswith("Samples~/RoundTrip/") or relative == "Samples~/RoundTrip.meta"):
+        if not relative.endswith(".meta") or not (
+            relative.startswith("Samples~/RoundTrip/")
+            or relative == "Samples~/RoundTrip.meta"
+            or relative == "LICENSE.meta"
+        ):
             continue
         guid = re.search(r"^guid: ([a-f0-9]{32})$", path.read_text(encoding="utf-8"), re.M)[1]
         asset = Path(str(path)[:-5])
         add(package, guid + "/asset.meta", path.read_bytes())
-        add(package, guid + "/pathname", ("Assets/ImageCodecSamples/" + relative[len("Samples~/"):-5]).encode())
+        pathname = (
+            "Assets/VrcAvifEncoder/LICENSE"
+            if relative == "LICENSE.meta"
+            else "Assets/ImageCodecSamples/" + relative[len("Samples~/"):-5]
+        )
+        add(package, guid + "/pathname", pathname.encode())
         if asset.is_file():
             add(package, guid + "/asset", asset.read_bytes())
 

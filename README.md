@@ -1,122 +1,194 @@
-# VRC AVIF and JPEG Codec
+# VRC Image Codec
 
-Independent single-image AVIF/JPEG encoders and matching decoders for Unity 2022.3 / VRChat Worlds SDK 3.10.5 or later. BSD-2-Clause; upstream attribution and the AOM patent grant are in ThirdParty/AV1 and PATENTS.
+Unity / VRChatワールド内で、RenderTextureをAVIF・JPEGに圧縮し、圧縮した画像をRenderTextureへ復元するUdonSharpライブラリです。GPUで画像処理を行い、エンコードとデコードを対になるAPIで提供します。
 
-## Install
-
-Import the generated unitypackage, or put this package in `Packages/com.gandalfr.vrc-avif`. Use **Tools → Image Codec → Create encoder**. The tool creates the component, compiled Udon programs and working RenderTextures. The VPM archive contains the same source; no native plug-in is required. VCC listing publication is a separate release step.
-
-## Encoder settings
-
-The Image Encoder Inspector exposes only format (AVIF/JPEG), chroma sampling (4:2:0/4:4:4), input RenderTexture, resolution and quality (default 60). Implementation components and working resources are configured automatically. Configure outside Play mode. The SDK Utilities foldout is omitted; compilation errors remain visible. Read-only encode/decode time and output-size estimates update with the selected settings. The Inspector shows coarse, single approximate values rather than ranges; detailed measurement assumptions remain in this documentation. Estimates use the 2026-10-26 RTX 3050 client measurements and the three-photo ClientSim matrix; AVIF timing is anchored to Fast scheduling, so the default scheduling can take longer. Resolution and Q60–80 are interpolated; outside the measured range the nearest reference is shown. These are indicative values, not performance or size guarantees.
-
-Resolution is a dropdown of width × height pairs that preserve the input aspect ratio exactly. Candidates never exceed the input dimensions or the supported 1920-pixel side / Full HD pixel-count limits. Common long-edge presets and the largest compatible size are offered; Both formats use eight-pixel alignment in the settings UI. No stretching or cropping is applied. For JPEG and AVIF authoring, both input dimensions must be at least 16 pixels and multiples of eight; the Inspector explains how to correct invalid inputs. If only one resolution is available, it recommends a larger input with a standard aspect ratio such as 16:9, 4:3 or 1:1. This is a warning and does not prevent encoding.
-
-Call `ImageEncoder.BeginEncoding()` and observe `busy`, `complete`, `error` and `resultBytes`. Call `CancelEncoding()` to cancel. The supplied RenderTexture is resized into an internal snapshot before compression. After cancellation, wait for `readbackPending` to clear before restarting. The format-specific APIs below remain available for integrations that already configure their own resources.
-
-## Connect components without writing code
-
-Create an encoder and decoder with **Tools → Image Codec**, then add **Image Codec Link** to a UI Button (or create a standalone link through the same menu). Drag the Image Encoder into **Encoder**, the Image Decoder into **Decoder**, and your output RawImage into **Display**. A UI Button on the same object is connected automatically after those references are assigned. For a world object, add a collider and use it to invoke the link. Connections are edited outside Play mode; the sample button and status label show the running operation.
-
-The link starts encoding, passes each completed byte array to the decoder without copying, and assigns the decoded RenderTexture to Display. It also forwards results when another component starts the encoder. Use one link per encoder/decoder pair; the link owns that decoder while processing. The encoder input must already contain the image you want to convert. No binary-string object, URL or file is required.
-
-## Unified decoder and data transfer
-
-Use **Tools → Image Codec → Create decoder**. `ImageDecoder` detects JPEG/AVIF from the bytes; there is no format, sampling or resolution setting. It delegates to the existing restricted-profile codecs, so their supported-format limits still apply.
-
-After `ImageEncoder.complete` becomes true:
-
-```csharp
-decoder.inputBytes = encoder.resultBytes;
-decoder.BeginDecoding();
+```text
+RenderTexture → ImageEncoder → byte[] → ImageDecoder → RenderTexture
 ```
 
-Wait for `decoder.complete`, then assign `decoder.resultTexture` to a RawImage or material. Observe `busy`, `error` and `readbackPending`; cancel with `CancelDecoding()`. The transfer shares the byte array without copying. Keep input bytes unchanged during decoding. The decoder owns and reuses the result texture; use a GPU blit if an earlier result must be retained. Neither operation writes a file automatically.
+撮影、表示、通信、暗号化、URL生成、ファイル保存は利用側のプロジェクトが担当します。このライブラリを使うためのサーバーやネイティブプラグインは不要です。
 
-### Round-trip sample
+## 動作環境と対応範囲
 
-For a unitypackage install, also import the matching `-sample.unitypackage`. For a package install, import **Encode, decode and display** from Package Manager Samples (or copy `Samples~/RoundTrip` into Assets).
+- Unity 2022.3 / VRChat Worlds SDK 3.10.5以降（UdonSharp・ClientSimを含む）。
+- PC向けShader Model 5.0。Direct3D 11で検証しています。Quest / モバイルは非対応です。他のGraphics APIは未検証です。
+- AVIF・JPEGともに、8-bit SDR、4:2:0または4:4:4の静止画を扱います。
+- 出力は各辺16〜1920ピクセル、8の倍数、合計2,073,600ピクセル以下です。縦長も使えます。
+- **デコーダーは、このライブラリが生成する形式に対応します。外部ソフトで作った任意のAVIF・JPEGを読めるものではありません。** アニメーション、HDR、アルファ、Progressive JPEGなどは非対応です。
 
-Select a photograph in the Project window, then use **Tools → Image Codec → Create round-trip sample**. With no selected photograph, the tool creates a portable gradient/checker pattern. Enter Play mode and click **Encode & Decode**: the left image is the input; the right is the decoded result. The status displays Encoding, Decoding, then the actual byte count. The sample uses the same Image Codec Link component. Its small `CodecRoundTrip` script only prepares the source image and updates the status label. Its child Image encoder exposes the five codec settings. No server, URL, camera model or native plugin is needed.
+生成したファイルは、対応する一般的な画像ビューアーで開けます。デコーダーが受け付ける詳細なプロファイルは[実装資料](Documentation/Implementation.md)に記載しています。
 
-## Format-specific API
+## 導入する
 
-Both components advance automatically in their own `Update`. Call Begin once and observe completion; do not also call Step every Update. Step is exposed for a caller that deliberately owns scheduling instead of the component's Update.
+既存のVRChat Worlds SDKプロジェクトに、[Releases](https://github.com/gandalfr-KY/vrc-image-codec/releases/latest) から本体の `.unitypackage` を取得してインポートしてください。パッケージとして管理する場合は、zipの内容を `Packages/com.gandalfr.vrc-avif` に配置できます。既存プロジェクトではパッケージ管理方法を混在させないでください。
 
-| Operation | Encoder | Decoder |
+1. **Tools > Image Codec > Create encoder** を選びます。
+2. Inspectorで入力RenderTextureと圧縮設定を指定します。
+3. 復元も行う場合は、**Tools > Image Codec > Create decoder** を選びます。
+
+このメニューから作成すると、内部Component、Material、作業用Texture、Udonプログラムが用意されます。通常は、空のGameObjectにComponentだけを追加して内部設定を手作業で埋める必要はありません。Inspectorの表示は英語です。
+
+### Encoderの設定
+
+設定はPlayモードに入る前に行います。
+
+| 項目 | 指定する内容 |
+| --- | --- |
+| Format | AVIFまたはJPEG |
+| Chroma sampling | 4:2:0は色の情報を減らして容量を節約します。4:4:4は色の細部を保ちます |
+| Input RenderTexture | 圧縮したい画像が入るRenderTexture |
+| Resolution | 入力の縦横比を保つ出力サイズ |
+| Quality | 1〜100。初期値は60。大きいほど通常は高画質・大容量になります |
+
+入力の幅・高さも、それぞれ16以上、8の倍数にしてください。Resolutionには、入力を超えず、縦横比と対応上限を満たす候補だけが表示されます。引き伸ばしや切り抜きは行いません。候補が一つしか出ない場合は、より大きく、16:9・4:3・1:1などの比率を持つ入力を用意すると選びやすくなります。
+
+Inspectorには処理時間とバイト長の大まかな目安も表示します。画像内容・GPU・フレームレートで変わるため、上限や性能保証ではありません。AVIFとJPEGのQualityは、同じ数値でも同じ画質を意味しません。
+
+Decoderには圧縮方式・解像度・サンプリングの設定はありません。渡されたバイナリから読み取ります。
+
+## まずサンプルを動かす
+
+unitypackageで導入した場合は、対応する `-sample.unitypackage` もインポートしてください。パッケージとして導入した場合は、Package ManagerのSamplesから **Encode, decode and display** をインポートします。手動で `Samples~/RoundTrip` をAssetsへコピーしても使えます。
+
+1. Projectで16:9の画像を選びます。省略するとテスト用の模様を生成します。
+2. **Tools > Image Codec > Create round-trip sample** を選びます。
+3. Playモードに入り、**Encode & Decode** を押します。
+
+左が入力、右が圧縮後に復元した画像です。完了すると圧縮済みバイナリのバイト数が表示されます。設定を変えるときはPlayモードを止め、子の **Image encoder** を選びます。
+
+サンプルの `ImageCodecLink` は、Encoder・Decoder・表示先RawImageをInspectorでつなぐ例です。UIへの表示はサンプル側にあり、コーデック本体はUnity UIに依存しません。独自のカメラ・通信システムでは、以下の公開APIから直接受け渡せます。
+
+## UdonSharpから使う
+
+利用するクラスは `VrcImageCodec.ImageEncoder` と `VrcImageCodec.ImageDecoder` です。Inspectorで作成したComponentを、自分のUdonSharpスクリプトの参照欄へ割り当てます。以下のAPIは、通常のMonoBehaviourからプロキシを直接操作するのではなく、UdonSharpスクリプトから呼び出します。
+
+### 圧縮を開始する
+
+```csharp
+// encoderは、Inspectorで設定したImageEncoder。
+// InputTextureには、圧縮したい画像を先に描画しておきます。
+bool accepted = encoder.TryBeginEncoding(encoder.InputTexture);
+```
+
+`true` は「開始を受け付けた」という意味です。処理は複数フレームにまたがるため、その場では結果を受け取れません。自分のUpdateなどで完了を待ちます。
+
+```csharp
+if (!encoder.IsBusy)
+{
+    if (encoder.IsComplete)
+    {
+        byte[] bytes = encoder.ResultBytes;
+        // 通信・保存・デコードなど、自分の処理へ渡します。
+    }
+    else
+    {
+        Debug.Log(encoder.LastError);
+    }
+}
+```
+
+この確認は、開始を受け付けた処理について一度だけ結果を扱うようにしてください。`IsComplete` は次の開始・キャンセルまでtrueのままなので、毎フレーム送信すると同じ結果を繰り返し送ってしまいます。サンプルではこの待機状態を管理しています。
+
+引数には、設定済み入力とは別のRenderTextureも渡せます。入力のサイズ条件と出力との縦横比を満たす必要があります。出力サイズ・形式はComponentに事前設定した値を使います。開始時に内部Textureへ画像をコピーするので、開始後も外部の入力RenderTextureを描画に使えます。
+
+### 復元を開始する
+
+```csharp
+bool accepted = decoder.TryBeginDecoding(bytes);
+```
+
+開始後、`decoder.IsBusy` がfalseになったら `decoder.IsComplete` を確認します。成功時の画像は `decoder.ResultTexture`、失敗理由は `decoder.LastError` から取得できます。RenderTextureをRawImageやMaterialへ割り当てる処理は、利用側で行います。サンプルにはRawImageへ表示する例があります。
+
+### API一覧
+
+| 操作・情報 | Encoder | Decoder |
 | --- | --- | --- |
-| Component | `AvifEncoder` | `AvifDecoder` |
-| Input | `gpuTransform.inputTexture` | `inputAvif` (`byte[]`) |
-| Start | `BeginEncoding()` | `BeginDecoding()` |
-| Explicit step | `StepEncoding()` | `StepDecoding()` |
-| Cancel | `CancelEncoding()` | `CancelDecoding()` |
-| Result | `resultAvif` (`byte[]`) | `resultTexture` (`RenderTexture`) |
-| State | `busy`, `complete`, `error`, `progress` | `busy`, `complete`, `error`, `progress` |
+| 開始を試みる | `TryBeginEncoding(RenderTexture)` | `TryBeginDecoding(byte[])` |
+| キャンセル | `CancelEncoding()` | `CancelDecoding()` |
+| 処理中か | `IsBusy` | `IsBusy` |
+| 成功して完了したか | `IsComplete` | `IsComplete` |
+| GPU読戻し待ちが残っているか | `HasPendingReadback` | `HasPendingReadback` |
+| 成功した結果 | `ResultBytes` | `ResultTexture` |
+| 失敗理由。エラーがなければ空文字列 | `LastError` | `LastError` |
 
-Render into `encoder.gpuTransform.inputTexture`, then call `encoder.BeginEncoding()`. When `complete` is true, pass `encoder.resultAvif` to `decoder.inputAvif` and call `decoder.BeginDecoding()`. When decoding completes, assign `decoder.resultTexture` to your display material. Create a configured decoder using **Tools → Image Codec → Create decoder**. Check `error` when an operation ends without completion.
+Encoderの設定は `Format`、`SubsampleChroma`、`InputTexture`、`Width`、`Height` で読み取れます。`Quality` だけは実行時にも変更でき、次の圧縮から使われます。その他の設定はEditorで変更し、作業用リソースを生成しておきます。
 
-Keep input bytes unchanged while decoding. The decoder owns its output RenderTexture and reuses it on the next decode; copy it with a GPU blit if a previous image must be retained. Cancel clears the public result/state but keeps GPU allocations for reuse. After cancelling an encode, wait until `gpuEntropy.readbackPending` is false before starting again; for decoding, wait for `decoder.readbackPending == false`. All state is local.
+ボタンなどから引数なしのUdonイベントで圧縮を開始する場合は、`BeginEncoding()` を呼べます。InspectorのInput RenderTextureを使います。設定内容のエラーは `GetConfigurationError()` でも確認できます。通常の呼び出しではTryメソッドが検証するため、先に検証を重ねる必要はありません。
 
-Editor code can call `VrcAvif.Encoder.Editor.AvifEncoderSetup.Configure(encoder, width, height, quality, load)`. Settings are validated there. Width and height must be multiples of eight, 16–1920, with at most 2,073,600 pixels. Default: 640×360, quality 60, 4:2:0. The optional final `subsampleChroma` argument selects 4:4:4 when false. Quality changes coding quality; load changes scheduling only. There is no fixed byte-size cap; output buffers are allocated after reading the exact GPU-generated length.
+### 開始できない場合とキャンセル
 
-The matching decoder scheduling API is `AvifEncoderSetup.Configure(decoder, load)`. Both accept `AvifProcessingLoad.Gentle`, `Normal` and `Fast`. Encoder GPU diagonals per frame are 2/4/8; decoder reconstruction diagonals are 4/8/16, with soft decoder CPU budgets of 1/2/4 ms. `Fast` reduces frame scheduling waits at a higher per-frame cost; it does not change quality or the AVIF bitstream. Normal remains the default. There is no CPU encoding budget because encoding no longer traverses coefficients on Udon.
+- 処理中またはGPU読戻し待ちの間、Tryメソッドはfalseを返します。進行中の処理と、現在の結果・エラーは変更しません。キューには入りません。
+- 入力や設定に問題がある場合もfalseを返し、`LastError` に理由を設定します。
+- 開始後にGPUや画像の解析で失敗した場合は、`IsBusy` がfalse、`IsComplete` がfalseになり、`LastError` に理由が入ります。
+- キャンセルは状態と結果参照をクリアします。発行済みのGPU処理は途中で停止できません。`HasPendingReadback` がfalseになってから再開してください。
 
-Adaptive CDF updates are always enabled. The experimental frozen-CDF encoder option and CPU entropy-coder path are removed.
+処理の完了確認まで、Componentとその内部の子オブジェクトを有効にしておいてください。Materialと作業用Textureは実行時にインスタンスごとに用意します。Hierarchyで複製したコーデックも、それぞれ独立して使えます。一つのComponentが同時に処理できる画像は一枚です。複数のシステムで同じComponentを使う場合は、呼び出し側で順番を管理します。
 
-The encoder GPU performs prediction, transform, quantization, coefficient traversal, syntax generation, all CDF updates, range coding and AVIF assembly. `AvifEncoder` coordinates the transform and `AvifGpuEntropy`; the latter owns intermediate textures and asynchronous readbacks. There is no coefficient readback or CPU-to-GPU symbol upload. A 4-byte syntax count sizes intermediate textures, then a 4-byte encoded length sizes the output; the final readback returns the complete AVIF in a padded buffer. Udon allocates the result byte array and copies the completed bytes. No guessed initial byte capacity or overflow retry is used. Byte output textures use up to 1024 RGBA pixels per row; only the last row is padded, and the width is passed to the shader. Fixed probability tables and container templates are generated by the Editor during configuration, not per photograph. Quality changes are applied to the AVIF header on the GPU.
+## 結果はどこにあり、いつまで使えるか
 
-The decoder parses the restricted container/frame headers on Udon and uploads the AVIF once. GPU geometry/fragment passes decode range symbols, update adaptive CDFs and emit coefficients in 16-block checkpoints. Ping-pong floating-point textures retain range/CDF/neighbour state without CPU readback. Prediction, inverse transforms, CDEF and RGB conversion also run on GPU. A small status readback rejects malformed entropy before reconstruction; a final four-byte readback fences RGB completion before publishing the output. `frameBudgetMs` limits CPU command-submission time, not GPU execution time; `diagonalsPerFrame` schedules reconstruction. Both codecs require PC shader model 5.0 (validated on D3D11) and floating-point RenderTextures. The AVIF decoder additionally uses geometry-shader instancing; Quest/mobile is unsupported. Range checkpoints use a two-dimensional atlas rather than assuming a 16,384-pixel device width. Integers in byte streams are packed explicitly, without host-endian or native pointer casts. Other graphics APIs and CPU architectures have not been validated.
+結果はメモリ上にあります。自動でディスクへ保存したり、他のプレイヤーへ送信したりはしません。
 
-For an existing encoder, run `AvifEncoderSetup.Configure(...)` once after upgrading. It adds/configures `gpuEntropy`, its three ordinary shaders and initial/header textures. Existing script GUIDs and the documented Begin/Step/Cancel/result API are retained. Intermediate transform fields use descriptive texture names with Unity serialization migration attributes. Reconfigure after upgrading. Diagnostic encoder fields `frameBudgetMs`, `entropySeconds`, `modeCounts` and the transform's old coefficient `result`/`readbackPending` are removed; consumers waiting for encoding readbacks should use `gpuEntropy.readbackPending`.
+| データ | 利用側で守ること |
+| --- | --- |
+| Encoderの`ResultBytes` | 完了ごとに新しい配列を返します。保持した配列は次の圧縮でも書き換えません。保存のためだけにコピーする必要はありません。共有中の配列は変更しないでください |
+| Decoderへ渡す`byte[]` | コピーせず受け取ります。デコードが終了し、GPU読戻し待ちもなくなるまでは、中身を変更しないでください |
+| Decoderの`ResultTexture` | Decoderが所有する作業用Textureです。次のデコードで再利用・置換されます。過去の画像を残す場合は、自分で用意したRenderTextureへ`VRCGraphics.Blit`でコピーしてください |
 
-AVIF sampling is configured by the last `subsampleChroma` argument of `AvifEncoderSetup.Configure` (default true, 4:2:0). Reconfigure generated textures when changing sampling. Current 4:4:4 encoding uses DC chroma prediction. `CodecBuffers` shares texture lifecycle handling and `CodecCommon.hlsl` shares byte packing/color helpers; format-specific transforms and entropy coding remain separate.
+読み取り専用プロパティは、参照の差し替えを防ぐものです。配列の中身やTextureそのものを変更禁止にする仕組みではありません。コーデックのGameObjectを内部の子ごと破棄すると、作業用GPUリソースも破棄されます。必要な画像は先にコピーしてください。
 
-The decoder accepts this encoder's restricted still-image profile, not general AVIF from arbitrary software: 8-bit SDR, 4:2:0 or 4:4:4, fixed 8×8 luma / 4×4 (4:2:0) or 8×8 (4:4:4) chroma transforms, one image, one tile, known headers, at most Full HD. Unsupported headers fail through `error`. Alpha, HDR, animation, other block layouts and arbitrary libaom output are outside this API. RGB output uses standard Unity texture orientation, exact sRGB conversion and nearest chroma upsampling. The benchmark checks reconstructed RGB and orientation against FFmpeg.
+## 既存バージョンからの移行
 
-There is no automatic codec fallback, network call, URL handling, encryption, synchronization or storage dependency. The package ID and script GUIDs are retained. Codec classes now use neutral names in `VrcImageCodec`; update source references when upgrading.
+0.7ではアプリケーション向けAPIを整理しました。設定のシリアライズ名とスクリプトGUIDは維持していますが、スクリプトからの呼び出しは変更が必要です。
 
-### Rate-distortion tuning and buffer layout
+| 0.6の使い方 | 0.7の使い方 |
+| --- | --- |
+| `encoder.busy / complete / error / resultBytes` | `IsBusy / IsComplete / LastError / ResultBytes` |
+| `decoder.inputBytes = bytes; decoder.BeginDecoding();` | `decoder.TryBeginDecoding(bytes)` |
+| `decoder.resultTexture`などの状態フィールド | `ResultTexture`などの読み取り専用プロパティ |
+| Encoderの設定フィールドを書き換える | Inspectorで設定。実行時の入力はTryメソッドへ渡し、画質は`Quality`で指定 |
+| ランタイムに含まれていた`ImageCodecLink` | サンプルをインポート。名前空間は`VrcImageCodec.Samples` |
 
-RDO weights are calculated from the pinned libaom 3.14.1 all-intra PSNR profile (8-bit, sharpness=0, no AQ/delta-Q), rather than a fixed coefficient times the AC quantizer squared. Let `q` be the luma DC dequantizer and `R = floor(q² × (3.3 + 0.0015 × q))`, from `rd.c`. Rate costs are in 1/512-bit units. With raw 4×4/8×8 coefficient SSE, mode selection uses `R × 4 / (128 × 512)`; the factor four compensates for the transform-domain SSE shift in `tx_search.c`. Coefficient optimization uses `round(R × 8 × P / 32) / (128 × 512)`, with `P=17` for Y and `P=13` for UV, matching all-intra `use_chroma_trellis_rd_mult=1` in `txb_rdopt.c`/`encodetxb.h`. Chroma shares the frame's luma-derived multiplier; its separate UV quantizer still controls dequantization.
+アップグレード後はEncoderのInspectorを開き、入力と設定を確認してください。0.6以前のDecoderはCreate decoderで作り直し、利用側の参照を差し替えてください。Editorスクリプトから生成する場合は `ImageEncoderSetup.Configure(encoder, input, format, width, height, quality, subsampleChroma)` を使えます。
 
-`ModeRateWeight` and `CoefficientRateWeight` share this calculation across luma, chroma and CfL. Coefficient decisions use the trellis weight; final candidate scores use the mode weight. The luma prediction shortlist estimates coefficient bits with the same CDF-derived cost functions as the final candidates, without the former per-zero/EOB heuristic penalties. This ports the weighting/unit conventions, not the complete libaom mode search: candidate limits, frozen cost estimates, approximate UV/transform syntax costs and this library's restricted transform profile remain. Compression and quality can change; decisions are not claimed identical to libaom.
+`AvifEncoder`、`JpegEncoder`などの個別Componentは内部処理・ベンチマーク用です。UdonのComponent間呼び出しに必要なpublicメンバーは残っていますが、新規の利用側コードは上記の共通APIへ接続してください。
 
-AVIF encoding sizes its event buffers from the GPU event count and its final output from the GPU's exact encoded length. Decoder upload/packet textures scale with input length and block count. Fixed state sizes describe the shader layout: 4096 CDF contexts with four pixels each, two range/cursor pixels and two neighbour-context pixels per block. A coefficient packet has three plane headers plus 64 Y and two 16/64 U,V coefficient words (99/195 words). The 1024-column atlas layout is packing, not a file-size limit. CDF/range replay checkpoints every 256/2048 symbols are GPU scheduling choices, not input limits.
+## ベンチマーク（0.7.0）
 
-Editor container/frame headers grow while being written; they have no 600/64-byte scratch reservations. Their four payload-length variants are packed into a texture sized from their actual lengths. Decoder container walking is bounded by input length and positive box sizes, without an arbitrary box-count or 300-byte minimum gate. Bounds, format, GPU failure and cancellation/readback ownership checks remain.
+2026年10月26日、Unity 2022.3.22f1のClientSimで、コンパイル済みUdonと実際のGPUを使って測定しました。NVIDIA GeForce RTX 3050、AMD Ryzen 5 5600、Direct3D 11、Linear色空間、目標60fpsでの結果です。VRChatクライアントでの実測ではありません。
 
-## GPU JPEG API
+下表はQuality 60の三枚の写真の平均です。各条件は一回ずつ実行し、初回の準備時間も含みます。AVIFはFastスケジューリングで測定しています。公開Componentの初期設定はNormalのため、通常設定の待ち時間とは異なります。
 
-Use **Tools → Image Codec → Create encoder** and choose JPEG. Use **Tools → Image Codec → Create decoder** for the matching decoder. JPEG is an explicit alternative; it does not change an existing AVIF camera or its Web protocol.
+| 形式 | 色差 | 解像度 | エンコード（秒） | デコード（秒） | バイナリ長（B） |
+| --- | --- | --- | ---: | ---: | ---: |
+| AVIF | 4:2:0 | 256×144 | 0.285 | 0.224 | 4,739 |
+| AVIF | 4:4:4 | 256×144 | 0.286 | 0.251 | 6,497 |
+| JPEG | 4:2:0 | 256×144 | 0.022 | 0.023 | 5,939 |
+| JPEG | 4:4:4 | 256×144 | 0.022 | 0.034 | 8,110 |
+| AVIF | 4:2:0 | 512×288 | 0.413 | 0.414 | 11,117 |
+| AVIF | 4:4:4 | 512×288 | 0.459 | 0.503 | 15,554 |
+| JPEG | 4:2:0 | 512×288 | 0.023 | 0.034 | 16,595 |
+| JPEG | 4:4:4 | 512×288 | 0.023 | 0.032 | 25,019 |
+| AVIF | 4:2:0 | 640×360 | 0.537 | 0.532 | 14,501 |
+| AVIF | 4:4:4 | 640×360 | 0.538 | 0.653 | 20,438 |
+| JPEG | 4:2:0 | 640×360 | 0.022 | 0.033 | 23,548 |
+| JPEG | 4:4:4 | 640×360 | 0.025 | 0.030 | 36,189 |
+| AVIF | 4:2:0 | 1280×720 | 0.955 | 1.274 | 34,197 |
+| AVIF | 4:4:4 | 1280×720 | 0.936 | 1.600 | 49,384 |
+| JPEG | 4:2:0 | 1280×720 | 0.023 | 0.034 | 70,420 |
+| JPEG | 4:4:4 | 1280×720 | 0.026 | 0.030 | 120,654 |
+| AVIF | 4:2:0 | 1920×1080 | 1.343 | 2.037 | 51,069 |
+| AVIF | 4:4:4 | 1920×1080 | 1.370 | 2.533 | 74,274 |
+| JPEG | 4:2:0 | 1920×1080 | 0.029 | 0.030 | 132,560 |
+| JPEG | 4:4:4 | 1920×1080 | 0.044 | 0.023 | 243,224 |
 
-| Operation | Encoder | Decoder |
-| --- | --- | --- |
-| Component | `JpegEncoder` | `JpegDecoder` |
-| Input | `inputTexture` (`Texture`, matching width/height) | `inputJpeg` (`byte[]`) |
-| Start | `BeginEncoding()` | `BeginDecoding()` |
-| Cancel | `CancelEncoding()` | `CancelDecoding()` |
-| Output | `resultJpeg` (`byte[]`) | `resultTexture` (`RenderTexture`) |
-| State | `busy`, `complete`, `error`, `progress`, `readbackPending`, `elapsedSeconds` | Same |
+時間は形式別コーデックの開始から完了通知までで、GPU処理と完了待ちを含みます。共通APIの入力コピー、撮影・通信・ファイル保存・検証処理は含みません。バイナリ長は圧縮ファイル自体の長さで、URLや暗号化のサイズではありません。異なる形式のQuality 60は、同等画質という意味ではありません。
 
-Call Begin once; GPU commands and readback callbacks finish the job without a Step/Update loop. Poll `complete`/`error`. While a job is busy, leave its settings, input, and material unchanged. Materials belong to individual components; do not share mutable material instances between concurrent jobs. After Cancel, wait for `readbackPending == false` before restarting. The decoder owns/reuses its result texture; GPU-blit a copy to keep an earlier image.
+**180条件すべてで外部照合に成功しました。** 各出力をFFmpeg 8.0.1で一回だけデコードし、GPUで復元した画像と寸法・向き・RGB値を照合しています。許容差は最大3/255、RMS 1.5/255です。Quality 60・70・80の個別結果と環境情報は[JSON](Documentation/Benchmarks/0.7.0.json)、表計算用データは[CSV](Documentation/Benchmarks/0.7.0.csv)にあります。
 
-Encoder settings: width/height 1–1920, at most 2,073,600 pixels, quality 1–100 (default 60), 8-bit SDR YCbCr **4:4:4** by default; set `subsampleChroma = true` for **4:2:0**. Odd dimensions are padded internally and cropped correctly on output. `linearInput` should match the input texture's sampled color space (normally true in a Linear project; false for an uploaded texture containing raw sRGB bytes). `linearOutput` normally matches the project's color space. Decoder output is RGBAHalf for linear output (to preserve dark detail) and RGBA32 for sRGB output. There is no fixed byte-size cap.
+## 検証とライセンス
 
-The output is a normal JFIF Baseline JPEG with Annex K Huffman tables, interleaved three-component scan and a restart interval of **one MCU (8×8 for 4:4:4, 16×16 for 4:2:0)**. This deliberately trades some compression for independent GPU entropy work. Standard JPEG readers can display it. The matching GPU decoder accepts exactly this header/profile (arbitrary dimensions, quantization tables and entropy payload within that profile), **not arbitrary JPEG**: progressive JPEG, 4:2:2, other marker layouts/tables and JPEGs without restart markers are rejected.
+[ベンチマークの実行手順](https://github.com/gandalfr-KY/vrc-image-codec/blob/main/Tests~/README.md)には、別のPC・Unityプロジェクトで検証する方法を記載しています。三枚の写真、五段階の解像度、AVIF/JPEG、4:2:0/4:4:4、Quality 60/70/80の固定条件で、実行時間とバイナリ長を測ります。出力ごとにFFmpegで一回だけ復元し、画像を照合します。
 
-GPU encoder: color conversion/subsampling → separable DCT/quantization → segment byte counts → prefix sum → direct entropy coding into the assembled JPEG → one readback containing the length and JPEG. Working capacity is derived from the MCU count and the baseline JPEG bit bound: at most 16 Huffman bits plus 11 DC amplitude bits, and 16 plus 10 bits for each of 63 AC coefficients per block; segment padding, byte stuffing, restart markers and the container header are included. This avoids a separate length-only completion wait at the cost of transferring unused capacity. The buffer is reused, and only the actual JPEG bytes are copied into the public result array. There is no fixed output-byte cap, overflow retry or alternate API. Texture allocation and byte packing helpers remain shared with AVIF.
+処理時間はGPU・フレームレート・初回のShader準備などによって変わります。短時間で完了しても、途中のフレーム負荷が小さいとは限りません。採用先のワールドでも負荷を確認してください。
 
-
-GPU decoder: byte upload → header validation → parallel restart-marker indexing → prefix sum → block-start states/Huffman decoding → dequantization/separable IDCT → RGB conversion and validation. CPU reads only width, height and sampling hints to allocate bounded textures; the complete header is still validated on GPU before a result is published. One final status readback completes decoding. Reconstructed pixels remain on GPU. CPU responsibilities are input/result buffer copies, allocations, command submission and completion state. No CPU JPEG image coding or native runtime plugin is used. This follows the restart-segment parallelism described by [GPUJPEG](https://github.com/CESNET/GPUJPEG); CUDA source was not transplanted into Udon.
-
-JPEG needs PC shader model 5.0 and floating-point render targets. Encoding and decoding retain their working textures for reuse (large floating-point coefficient/IDCT buffers plus an encoded-output buffer sized from the actual result; memory depends on resolution and subsampling). First-use allocation/driver compilation can stall frames. A fast completion time does not guarantee a small maximum frame time. Call Cancel to cancel a result; it cannot interrupt GPU work already submitted.
-
-## Minimal camera example
-
-Copy Samples~/MinimalCamera into Assets. Add MinimalAvifCapture alongside the encoder and assign its Camera and encoder fields. Render a frame using Capture(), then wait for the encoder result. The example has no pickup or UI; custom camera models and capture controllers stay outside this library.
-
-## Verification and releases
-
-The single portable benchmark replaces the older fixture/oracle test suites. See [Tests~/README.md](Tests~/README.md). It measures the production compiled-Udon encoder/decoder pair in ClientSim for three bundled world photographs, five resolutions, both chroma samplings and Q60/70/80, then checks each output once against FFmpeg. It writes timing/size/pixel-error results as JSON and CSV. No machine-specific source paths or native C# codec substitutes are used.
-
-`python Tools~/pack.py` creates a VPM package zip and GUID-preserving unitypackage under release/. Tests, build tools and optional samples are excluded from the installed package; the sample is included separately in the zip under Samples~.
+本プロジェクトで作成した部分はMITライセンスです。tinyavif・libaom由来の部分には元のBSD-2-Clauseと特許ライセンスが適用されます。[LICENSE](LICENSE)、[第三者の著作権表示](THIRD_PARTY_NOTICES.md)、[AOMedia特許ライセンス](PATENTS)を同梱しています。変更に参加する場合は[CONTRIBUTING.md](CONTRIBUTING.md)、内部構造を調べる場合は[実装資料](Documentation/Implementation.md)を参照してください。リリースを自分で作成する場合は、[GitHubのソース](https://github.com/gandalfr-KY/vrc-image-codec)を取得し、`python Tools~/pack.py` を実行してください。ソースzipには検証用の画像・ツールも含みます。

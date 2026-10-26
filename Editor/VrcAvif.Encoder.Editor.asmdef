@@ -6,8 +6,7 @@
     "UdonSharp.Editor",
     "VRC.Udon",
     "VRC.Udon.Editor",
-    "VRC.Udon.Serialization.OdinSerializer",
-    "Unity.ugui"
+    "VRC.Udon.Serialization.OdinSerializer"
   ],
   "includePlatforms": [
     "Editor"

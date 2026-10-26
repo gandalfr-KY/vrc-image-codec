@@ -13,6 +13,8 @@ public class JpegDecoder : UdonSharpBehaviour
 {
     public byte[] inputJpeg;
     public Material material;
+    [HideInInspector]
+    public Renderer materialSource;
     public Texture2D huffman;
     public bool linearOutput = true;
     [HideInInspector]
@@ -33,12 +35,13 @@ public class JpegDecoder : UdonSharpBehaviour
     private RenderTexture header, metadata, restartOffsets, restartScanScratch, blockStarts, coefficients,
         inverseRows, output, errorCounts, errorScanScratch;
     private float startedAt;
+    private bool ownsMaterial;
 
     public void BeginDecoding()
     {
         if (busy || readbackPending) return;
         CancelDecoding();
-        if (!material || !huffman || inputJpeg == null || inputJpeg.Length < 631)
+        if (!material || !materialSource || !huffman || inputJpeg == null || inputJpeg.Length < 631)
         {
             error = "JPEG requires configured material/tables and a complete Baseline JPEG input.";
             return;
@@ -52,6 +55,11 @@ public class JpegDecoder : UdonSharpBehaviour
             return;
         }
         subsampleChroma = inputJpeg[169] == 34;
+        if (!ownsMaterial)
+        {
+            material = materialSource.material;
+            ownsMaterial = true;
+        }
         startedAt = Time.realtimeSinceStartup;
         busy = true;
         int uploadRows = (inputJpeg.Length + 4095) / 4096;
@@ -170,6 +178,7 @@ public class JpegDecoder : UdonSharpBehaviour
 
     private void OnDestroy()
     {
+        if (ownsMaterial) Destroy(material);
         if (upload) Destroy(upload);
         RenderTexture[] textures = { header,      metadata,        restartOffsets, restartScanScratch,
                                      blockStarts, coefficients,    inverseRows,    output,

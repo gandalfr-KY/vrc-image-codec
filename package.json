@@ -1,10 +1,10 @@
 {
   "name": "com.gandalfr.vrc-avif",
   "displayName": "VRC AVIF and JPEG Codec",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "unity": "2022.3",
   "description": "Paired GPU AVIF (4:2:0/4:4:4) and Baseline JPEG (4:4:4/4:2:0) image codecs for UdonSharp. No network or encryption.",
-  "license": "BSD-2-Clause",
+  "license": "MIT",
   "vpmDependencies": {
     "com.vrchat.worlds": ">=3.10.5"
   },
@@ -14,8 +14,5 @@
       "description": "One button transfers encoded bytes to the unified decoder and displays the image.",
       "path": "Samples~/RoundTrip"
     }
-  ],
-  "dependencies": {
-    "com.unity.ugui": "1.0.0"
-  }
+  ]
 }

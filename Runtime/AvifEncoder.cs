@@ -37,9 +37,10 @@ public class AvifEncoder : UdonSharpBehaviour
         }
         CancelEncoding();
         if (!gpuTransform || !gpuEntropy || !gpuTransform.material || !gpuEntropy.syntaxMaterial ||
-            !gpuEntropy.cdfMaterial || !gpuEntropy.rangeMaterial || !gpuEntropy.initialCdf ||
-            !gpuEntropy.containerHeaders || width != gpuEntropy.width || height != gpuEntropy.height ||
-            subsampleChroma != gpuEntropy.subsampleChroma || quality < 0 || quality > 100)
+            !gpuEntropy.cdfMaterial || !gpuEntropy.rangeMaterial || !gpuEntropy.materialSource ||
+            !gpuEntropy.initialCdf || !gpuEntropy.containerHeaders || width != gpuEntropy.width ||
+            height != gpuEntropy.height || subsampleChroma != gpuEntropy.subsampleChroma || quality < 0 ||
+            quality > 100)
         {
             error = "Configure the encoder's GPU resources and dimensions before encoding.";
             return;

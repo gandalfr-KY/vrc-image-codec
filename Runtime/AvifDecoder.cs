@@ -13,6 +13,8 @@ public class AvifDecoder : UdonSharpBehaviour
     public byte[] inputAvif;
     public Material material;
     [HideInInspector]
+    public Renderer materialSource;
+    [HideInInspector]
     public Material entropyMaterial;
     [HideInInspector]
     public Texture2D initialCdf;
@@ -36,6 +38,7 @@ public class AvifDecoder : UdonSharpBehaviour
     private int blockColumns, blockRows, decodedBlockCursor, blockLimit, stage, byteOffset, obuEnd, bitOffset,
         headerEnd, quantizerIndex, quantizerContext, diagonal;
     private float startedAt;
+    private bool ownsMaterials;
     private Texture2D upload;
     private RenderTexture stateA, stateB, packets, status, quant, recon, filtered, mode, uvMode, scratch,
         chromaScratch, output;
@@ -46,7 +49,7 @@ public class AvifDecoder : UdonSharpBehaviour
         if (busy || readbackPending) return;
         CancelDecoding();
         data = inputAvif;
-        if (data == null || !material || !entropyMaterial || !initialCdf)
+        if (data == null || !material || !entropyMaterial || !materialSource || !initialCdf)
         {
             Fail(
                 "AVIF decoding requires configured GPU materials/tables and a complete still-image payload.");
@@ -55,6 +58,14 @@ public class AvifDecoder : UdonSharpBehaviour
         busy = true;
         startedAt = Time.realtimeSinceStartup;
         if (!ReadProfile()) return;
+        if (!ownsMaterials)
+        {
+            // Slot order matches ConfigureGpuDecoder: reconstruction, entropy.
+            Material[] materials = materialSource.materials;
+            material = materials[0];
+            entropyMaterial = materials[1];
+            ownsMaterials = true;
+        }
         blockColumns = width / 8;
         blockRows = height / 8;
         quantizerContext = quantizerIndex <= 20    ? 0
@@ -456,6 +467,11 @@ public class AvifDecoder : UdonSharpBehaviour
 
     private void OnDestroy()
     {
+        if (ownsMaterials)
+        {
+            Destroy(material);
+            Destroy(entropyMaterial);
+        }
         if (upload) Destroy(upload);
         CodecBuffers.Release(new RenderTexture[] { stateA, stateB, packets, status, quant, recon, filtered,
                                                    mode, uvMode, scratch, chromaScratch, output });

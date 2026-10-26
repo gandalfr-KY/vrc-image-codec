@@ -10,3 +10,5 @@ The left image is the input. The right image is restored from the compressed byt
 Select **Run codec** to inspect Image Codec Link. Its only connection fields are Encoder, Decoder and Display; drag components from Hierarchy to change them. The button event is wired automatically. Image Codec Link handles compression, byte-array transfer, decoding and display. `CodecRoundTrip.cs` only prepares the source image and displays status; it contains no transfer logic.
 
 The sample creates a Canvas, button, view camera and a world descriptor if needed. It does not replace an existing scene. Its input texture is 640×360; use a 16:9 source or supply your own appropriate RenderTexture for another ratio. Results stay in memory and are not saved as files automatically.
+
+ImageCodecLink is sample code in `VrcImageCodec.Samples`, not a runtime dependency of the codec. Its data flow uses the public read-only properties and `TryBeginDecoding(bytes)`. See the package README for the supported API, cancellation, and result ownership.

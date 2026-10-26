@@ -4,9 +4,9 @@ using UnityEditor.Events;
 using UnityEngine;
 using UnityEngine.UI;
 using UdonSharpEditor;
-using VrcImageCodec;
+using VrcAvif.Encoder.Editor;
 
-namespace VrcAvif.Encoder.Editor
+namespace VrcImageCodec.Samples.Editor
 {
 [CustomEditor(typeof(ImageCodecLink))]
 public class ImageCodecLinkInspector : UnityEditor.Editor

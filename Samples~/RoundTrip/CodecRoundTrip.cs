@@ -16,13 +16,13 @@ public class CodecRoundTrip : UdonSharpBehaviour
 
     private void Start()
     {
-        if (sourceImage) VRCGraphics.Blit(sourceImage, link.encoder.inputTexture);
-        original.texture = link.encoder.inputTexture;
+        if (sourceImage) VRCGraphics.Blit(sourceImage, link.encoder.InputTexture);
+        original.texture = link.encoder.InputTexture;
     }
 
     private void Update()
     {
-        status.text = link.status;
+        status.text = link.Status;
     }
 }
 }

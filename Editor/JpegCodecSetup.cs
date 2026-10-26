@@ -32,6 +32,8 @@ public static class JpegCodecSetup
         if (EditorApplication.isPlayingOrWillChangePlaymode)
             throw new InvalidOperationException("Configure outside Play mode.");
         encoder.material = Material(encoder.material, "Encoder");
+        encoder.materialSource = CodecMaterialSetup.Configure(encoder.materialSource, encoder.transform,
+                                                              new[] { encoder.material });
         encoder.linearInput = PlayerSettings.colorSpace == ColorSpace.Linear;
         UdonSharpEditorUtility.CopyProxyToUdon(encoder);
         EditorUtility.SetDirty(encoder);
@@ -42,6 +44,8 @@ public static class JpegCodecSetup
         if (EditorApplication.isPlayingOrWillChangePlaymode)
             throw new InvalidOperationException("Configure outside Play mode.");
         decoder.material = Material(decoder.material, "Decoder");
+        decoder.materialSource = CodecMaterialSetup.Configure(decoder.materialSource, decoder.transform,
+                                                              new[] { decoder.material });
         decoder.linearOutput = PlayerSettings.colorSpace == ColorSpace.Linear;
         decoder.huffman = Lookup();
         UdonSharpEditorUtility.CopyProxyToUdon(decoder);

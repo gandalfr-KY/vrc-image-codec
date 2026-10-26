@@ -31,12 +31,12 @@ public static class CodecRoundTripSetup
         ImageEncoderSetup.Create();
         link.encoder = Selection.activeGameObject.GetComponent<ImageEncoder>();
         link.encoder.transform.SetParent(root.transform, false);
-        link.encoder.inputTexture =
+        var input =
             new RenderTexture(640, 360, 0, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear);
-        link.encoder.inputTexture.name = "Sample input";
-        AssetDatabase.CreateAsset(link.encoder.inputTexture, AssetDatabase.GenerateUniqueAssetPath(
-                                                                 directory + "/Input.renderTexture"));
-        ImageEncoderSetup.Configure(link.encoder);
+        input.name = "Sample input";
+        AssetDatabase.CreateAsset(
+            input, AssetDatabase.GenerateUniqueAssetPath(directory + "/Input.renderTexture"));
+        ImageEncoderSetup.Configure(link.encoder, input, ImageEncodingFormat.AVIF, 640, 360);
         ImageDecoderSetup.Create();
         link.decoder = Selection.activeGameObject.GetComponent<ImageDecoder>();
         link.decoder.transform.SetParent(root.transform, false);

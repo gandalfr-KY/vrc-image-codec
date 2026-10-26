@@ -18,6 +18,8 @@ public class AvifGpuTransform : UdonSharpBehaviour
     private const int PrepareSourcePass = 13, ChromaOptimizePass = 14, InverseRowsPass = 15,
                       CflCostsPass = 16;
     public Material material;
+    [HideInInspector]
+    public Renderer materialSource;
     public RenderTexture modeTexture, cflTexture, optimizedTexture, candidateTexture;
     [FormerlySerializedAs("uvCandidates")]
     public RenderTexture chromaCandidateTexture;
@@ -50,21 +52,42 @@ public class AvifGpuTransform : UdonSharpBehaviour
     public float elapsedSeconds, submitCpuSeconds, maxStepMs;
     private int diagonal, diagonals;
     private float startedAt;
+    private bool ownsResources;
 
     public void BeginTransform()
     {
         CancelTransform();
         // Setup owns intermediate texture layouts; runtime checks only the public input boundary.
-        if (!material || !inputTexture || !sourceYuvTexture || !quantizedTexture || !reconstructionTexture ||
-            !filteredTexture || !packedTexture || !modeTexture || !cflTexture || !optimizedTexture ||
-            !candidateTexture || !chromaCandidateTexture || !chromaModeTexture || !predictionCostTexture ||
-            !predictionShortlistTexture || (!subsampleChroma && !chromaTexture) || width < 16 ||
-            height < 16 || width > 1920 || height > 1920 || width * height > 2073600 || width % 8 != 0 ||
-            height % 8 != 0 || inputTexture.width != width || inputTexture.height != height || quantDc <= 0 ||
-            quantAc <= 0 || diagonalsPerFrame < 1 || diagonalsPerFrame > 16)
+        if (!material || !materialSource || !inputTexture || !sourceYuvTexture || !quantizedTexture ||
+            !reconstructionTexture || !filteredTexture || !packedTexture || !modeTexture || !cflTexture ||
+            !optimizedTexture || !candidateTexture || !chromaCandidateTexture || !chromaModeTexture ||
+            !predictionCostTexture || !predictionShortlistTexture || (!subsampleChroma && !chromaTexture) ||
+            width < 16 || height < 16 || width > 1920 || height > 1920 || width * height > 2073600 ||
+            width % 8 != 0 || height % 8 != 0 || inputTexture.width != width ||
+            inputTexture.height != height || quantDc <= 0 || quantAc <= 0 || diagonalsPerFrame < 1 ||
+            diagonalsPerFrame > 16)
         {
             error = "Configure GPU resources for the input dimensions before encoding.";
             return;
+        }
+        if (!ownsResources)
+        {
+            material = materialSource.material;
+            modeTexture = CodecBuffers.AllocateLike(modeTexture);
+            cflTexture = CodecBuffers.AllocateLike(cflTexture);
+            optimizedTexture = CodecBuffers.AllocateLike(optimizedTexture);
+            candidateTexture = CodecBuffers.AllocateLike(candidateTexture);
+            chromaCandidateTexture = CodecBuffers.AllocateLike(chromaCandidateTexture);
+            chromaModeTexture = CodecBuffers.AllocateLike(chromaModeTexture);
+            predictionCostTexture = CodecBuffers.AllocateLike(predictionCostTexture);
+            predictionShortlistTexture = CodecBuffers.AllocateLike(predictionShortlistTexture);
+            quantizedTexture = CodecBuffers.AllocateLike(quantizedTexture);
+            reconstructionTexture = CodecBuffers.AllocateLike(reconstructionTexture);
+            filteredTexture = CodecBuffers.AllocateLike(filteredTexture);
+            packedTexture = CodecBuffers.AllocateLike(packedTexture);
+            sourceYuvTexture = CodecBuffers.AllocateLike(sourceYuvTexture);
+            chromaTexture = subsampleChroma ? null : CodecBuffers.AllocateLike(chromaTexture);
+            ownsResources = true;
         }
         int columns = width / 8, rows = height / 8;
         startedAt = Time.realtimeSinceStartup;
@@ -157,6 +180,17 @@ public class AvifGpuTransform : UdonSharpBehaviour
         VRCGraphics.Blit(Texture2D.blackTexture, quantizedTexture, material, QuantizePass);
         VRCGraphics.Blit(Texture2D.blackTexture, work, material, InverseRowsPass);
         VRCGraphics.Blit(Texture2D.blackTexture, reconstructionTexture, material, ReconstructPass);
+    }
+
+    private void OnDestroy()
+    {
+        if (!ownsResources) return;
+        Destroy(material);
+        CodecBuffers.Release(
+            new RenderTexture[] { modeTexture, cflTexture, optimizedTexture, candidateTexture,
+                                  chromaCandidateTexture, chromaModeTexture, predictionCostTexture,
+                                  predictionShortlistTexture, quantizedTexture, reconstructionTexture,
+                                  filteredTexture, packedTexture, sourceYuvTexture, chromaTexture });
     }
 }
 }

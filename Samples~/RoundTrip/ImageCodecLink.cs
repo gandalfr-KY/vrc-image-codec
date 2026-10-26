@@ -2,19 +2,21 @@ using UdonSharp;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace VrcImageCodec
+namespace VrcImageCodec.Samples
 {
-[AddComponentMenu("Image Codec/Image Codec Link")]
+[AddComponentMenu("Image Codec/Samples/Image Codec Link")]
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class ImageCodecLink : UdonSharpBehaviour
 {
     public ImageEncoder encoder;
     public ImageDecoder decoder;
     public RawImage display;
-    [HideInInspector]
-    public bool busy, complete;
-    [HideInInspector]
-    public string error = "", status = "Ready";
+    private bool busy, complete;
+    private string error = "", status = "Ready";
+    public bool IsBusy => busy;
+    public bool IsComplete => complete;
+    public string LastError => error;
+    public string Status => status;
     private byte[] lastBytes;
     private bool waitingForEncoder, waitingForDecoder;
 
@@ -39,7 +41,8 @@ public class ImageCodecLink : UdonSharpBehaviour
             status = error;
             return;
         }
-        if (busy || encoder.busy || decoder.busy || encoder.readbackPending || decoder.readbackPending)
+        if (busy || encoder.IsBusy || decoder.IsBusy || encoder.HasPendingReadback ||
+            decoder.HasPendingReadback)
             return;
         complete = false;
         busy = waitingForEncoder = true;
@@ -50,30 +53,30 @@ public class ImageCodecLink : UdonSharpBehaviour
     private void Update()
     {
         if (!encoder || !decoder || !display) return;
-        if (waitingForEncoder && !encoder.busy && !encoder.complete)
+        if (waitingForEncoder && !encoder.IsBusy && !encoder.IsComplete)
         {
-            Finish(encoder.error == "" ? "Encoding did not complete." : encoder.error);
+            Finish(encoder.LastError == "" ? "Encoding did not complete." : encoder.LastError);
             return;
         }
         // Also accept encodes started by another component. Each result is forwarded once.
-        if (encoder.complete && encoder.resultBytes != lastBytes && !decoder.busy && !decoder.readbackPending)
+        if (encoder.IsComplete && encoder.ResultBytes != lastBytes && !decoder.IsBusy &&
+            !decoder.HasPendingReadback)
         {
             complete = false;
             busy = waitingForDecoder = true;
             waitingForEncoder = false;
-            lastBytes = encoder.resultBytes;
-            decoder.inputBytes = lastBytes;
-            decoder.BeginDecoding();
+            lastBytes = encoder.ResultBytes;
+            decoder.TryBeginDecoding(lastBytes);
             status = "Decoding...";
         }
-        if (!waitingForDecoder || decoder.busy) return;
+        if (!waitingForDecoder || decoder.IsBusy) return;
         waitingForDecoder = false;
-        if (!decoder.complete)
+        if (!decoder.IsComplete)
         {
-            Finish(decoder.error == "" ? "Decoding did not complete." : decoder.error);
+            Finish(decoder.LastError == "" ? "Decoding did not complete." : decoder.LastError);
             return;
         }
-        display.texture = decoder.resultTexture;
+        display.texture = decoder.ResultTexture;
         complete = true;
         Finish("");
     }

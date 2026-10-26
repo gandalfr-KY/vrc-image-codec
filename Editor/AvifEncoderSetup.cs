@@ -104,6 +104,7 @@ public static class AvifEncoderSetup
             "Assets/AvifEncoderGenerated/" + encoder.GetInstanceID().ToString().Replace("-", "n");
         Directory.CreateDirectory(directory);
         AssetDatabase.Refresh();
+        CodecAssetOwnership.DetachSharedAssets(gpu, directory);
         var shader = Shader.Find("VrcImageCodec/AV1 Intra");
         if (!shader) throw new InvalidOperationException("AV1 Intra shader is missing.");
         if (!gpu.material)
@@ -114,6 +115,8 @@ public static class AvifEncoderSetup
         }
         gpu.material.shader = shader;
         ConfigureRateCosts(gpu.material, directory);
+        gpu.materialSource =
+            CodecMaterialSetup.Configure(gpu.materialSource, gpu.transform, new[] { gpu.material });
         int columns = w / 8, rows = h / 8;
         gpu.optimizedTexture = Texture(directory, "Optimized coefficients", columns * 16, rows, false,
                                        gpu.optimizedTexture, true);
@@ -152,6 +155,7 @@ public static class AvifEncoderSetup
                 encoder.gpuEntropy = encoder.gameObject.AddUdonSharpComponent<AvifGpuEntropy>();
         }
         encoder.gpuEntropy.subsampleChroma = subsampleChroma;
+        CodecAssetOwnership.DetachSharedAssets(encoder.gpuEntropy, directory);
         ConfigureEntropy(encoder.gpuEntropy, w, h, directory);
         UdonSharpEditorUtility.CopyProxyToUdon(encoder.gpuEntropy);
         UdonSharpEditorUtility.CopyProxyToUdon(encoder);
@@ -178,6 +182,9 @@ public static class AvifEncoderSetup
             EntropyMaterial(entropy.rangeMaterial, "VrcAvif/Range coding", directory + "/Range.mat");
         if (!entropy.initialCdf) entropy.initialCdf = InitialCdf(directory);
         AvifContainerTemplate.Configure(entropy, width, height, directory);
+        entropy.materialSource = CodecMaterialSetup.Configure(
+            entropy.materialSource, entropy.transform,
+            new[] { entropy.syntaxMaterial, entropy.cdfMaterial, entropy.rangeMaterial });
         EditorUtility.SetDirty(entropy);
     }
     static Texture2D InitialCdf(string directory)
@@ -221,6 +228,8 @@ public static class AvifEncoderSetup
             decoder.entropyMaterial =
                 EntropyMaterial(null, "VrcImageCodec/AV1 Decode", directory + "/Decode entropy.mat");
         if (!decoder.initialCdf) decoder.initialCdf = InitialCdf(directory);
+        decoder.materialSource = CodecMaterialSetup.Configure(
+            decoder.materialSource, decoder.transform, new[] { decoder.material, decoder.entropyMaterial });
     }
     static Material EntropyMaterial(Material material, string name, string path)
     {

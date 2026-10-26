@@ -13,6 +13,8 @@ public class JpegEncoder : UdonSharpBehaviour
 {
     public Texture inputTexture;
     public Material material;
+    [HideInInspector]
+    public Renderer materialSource;
     public int width = 640, height = 360, quality = 60;
     public bool linearInput = true;
     public bool subsampleChroma;
@@ -27,13 +29,14 @@ public class JpegEncoder : UdonSharpBehaviour
     private RenderTexture rowTransforms, coefficients, segmentOffsets, scanScratch, output;
     private float startedAt;
     private byte[] readbackBuffer;
+    private bool ownsMaterial;
 
     public void BeginEncoding()
     {
         if (busy || readbackPending) return;
         CancelEncoding();
-        if (!material || !inputTexture || quality < 1 || quality > 100 || width < 1 || height < 1 ||
-            width > 1920 || height > 1920 || width * height > 2073600)
+        if (!material || !materialSource || !inputTexture || quality < 1 || quality > 100 || width < 1 ||
+            height < 1 || width > 1920 || height > 1920 || width * height > 2073600)
         {
             error = "JPEG requires a material, input texture, quality 1..100 and at most 1920x1080 pixels.";
             return;
@@ -42,6 +45,11 @@ public class JpegEncoder : UdonSharpBehaviour
         {
             error = "JPEG input texture dimensions must match width and height.";
             return;
+        }
+        if (!ownsMaterial)
+        {
+            material = materialSource.material;
+            ownsMaterial = true;
         }
         startedAt = Time.realtimeSinceStartup;
         busy = true;
@@ -129,6 +137,7 @@ public class JpegEncoder : UdonSharpBehaviour
 
     private void OnDestroy()
     {
+        if (ownsMaterial) Destroy(material);
         RenderTexture[] textures = { rowTransforms, coefficients, segmentOffsets, scanScratch, output };
         CodecBuffers.Release(textures);
     }

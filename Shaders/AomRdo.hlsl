@@ -60,7 +60,7 @@ int LumaCoefficientRate(int q[64],int end,int levels[144]){
 int LumaQuant(int value,int local,int tx){if(tx!=4)return QuantAt(value,0,local);int q=StepBase(0,local);if(abs(value)<(q+1)/2)return 0;int a=(int)floor((min(abs(value)+q/2,32767)*floor(65536./q))/65536.);return value<0?-a:a;}
 int PredictionRate(int code,int2 xy);
 // Copyright (c) 2021, Alliance for Open Media. All rights reserved.
-// BSD-2-Clause + AOM Patent License 1.0, see LICENSE and PATENTS.
+// BSD-2-Clause + AOM Patent License 1.0, see ThirdParty/AV1/AOM-LICENSE and PATENTS.
 // Port of txb_rdopt.c: av1_optimize_txb, update_coeff_general/eob/simple/skip.
 // Fixed 8x8, 8-bit, intra, 2D transform class, sharpness=0, no QM.
 // Float RD decisions are intentional. Costs use frozen native CDFs, not a

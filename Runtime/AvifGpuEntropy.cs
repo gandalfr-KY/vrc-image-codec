@@ -13,6 +13,8 @@ namespace VrcImageCodec
 public class AvifGpuEntropy : UdonSharpBehaviour
 {
     public Material syntaxMaterial, cdfMaterial, rangeMaterial;
+    [HideInInspector]
+    public Renderer materialSource;
     public Texture2D initialCdf, containerHeaders;
     public bool subsampleChroma = true;
     public int width = 640, height = 360;
@@ -34,9 +36,19 @@ public class AvifGpuEntropy : UdonSharpBehaviour
 
     private byte[] countReadback = new byte[4];
     private byte[] imageReadback;
+    private bool ownsMaterials;
 
     public void BeginEncoding(RenderTexture packet, int quantizerIndex)
     {
+        if (!ownsMaterials)
+        {
+            // Slot order matches ConfigureEntropy: syntax, CDF, range.
+            Material[] materials = materialSource.materials;
+            syntaxMaterial = materials[0];
+            cdfMaterial = materials[1];
+            rangeMaterial = materials[2];
+            ownsMaterials = true;
+        }
         busy = true;
         complete = false;
         error = "";
@@ -190,6 +202,12 @@ public class AvifGpuEntropy : UdonSharpBehaviour
 
     private void OnDestroy()
     {
+        if (ownsMaterials)
+        {
+            Destroy(syntaxMaterial);
+            Destroy(cdfMaterial);
+            Destroy(rangeMaterial);
+        }
         RenderTexture[] textures = { prefixA,        prefixB,
                                      countTexture,   events,
                                      sortedA,        sortedB,

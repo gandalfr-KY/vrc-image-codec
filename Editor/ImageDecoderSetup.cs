@@ -17,14 +17,18 @@ public static class ImageDecoderSetup
         var root = new GameObject("Image decoder");
         Undo.RegisterCreatedObjectUndo(root, "Create image decoder");
         var decoder = root.AddUdonSharpComponent<ImageDecoder>();
+        var settings = new SerializedObject(decoder);
         AvifEncoderSetup.CreateDecoder();
-        decoder.avifDecoder = Selection.activeGameObject.GetComponent<AvifDecoder>();
-        decoder.avifDecoder.transform.SetParent(root.transform, false);
-        decoder.avifDecoder.gameObject.hideFlags = HideFlags.HideInHierarchy;
+        var avif = Selection.activeGameObject.GetComponent<AvifDecoder>();
+        avif.transform.SetParent(root.transform, false);
+        avif.gameObject.hideFlags = HideFlags.HideInHierarchy;
+        settings.FindProperty("avifDecoder").objectReferenceValue = avif;
         JpegCodecSetup.CreateDecoder();
-        decoder.jpegDecoder = Selection.activeGameObject.GetComponent<JpegDecoder>();
-        decoder.jpegDecoder.transform.SetParent(root.transform, false);
-        decoder.jpegDecoder.gameObject.hideFlags = HideFlags.HideInHierarchy;
+        var jpeg = Selection.activeGameObject.GetComponent<JpegDecoder>();
+        jpeg.transform.SetParent(root.transform, false);
+        jpeg.gameObject.hideFlags = HideFlags.HideInHierarchy;
+        settings.FindProperty("jpegDecoder").objectReferenceValue = jpeg;
+        settings.ApplyModifiedProperties();
         UdonSharpEditorUtility.CopyProxyToUdon(decoder);
         EditorUtility.SetDirty(decoder);
         EditorSceneManager.MarkSceneDirty(root.scene);
@@ -40,11 +44,11 @@ public class ImageDecoderInspector : UnityEditor.Editor
         if (UdonSharpGUI.DrawProgramSource(target, false)) return;
         UdonSharpGUI.DrawCompileErrorTextArea();
         EditorGUILayout.HelpBox(
-            "Format and resolution are detected automatically. Use an Image Codec Link to connect " +
-                "an encoder and display.",
+            "Call TryBeginDecoding(bytes) from UdonSharp. Format and resolution are detected " +
+                "automatically. The optional round-trip sample demonstrates data transfer and display.",
             MessageType.Info);
         var decoder = (ImageDecoder)target;
-        if (decoder.error != "") EditorGUILayout.HelpBox(decoder.error, MessageType.Error);
+        if (decoder.LastError != "") EditorGUILayout.HelpBox(decoder.LastError, MessageType.Error);
     }
 }
 }

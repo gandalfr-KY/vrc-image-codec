@@ -49,15 +49,15 @@ internal static class ImageEncodingEstimates
 
     public static void Draw(ImageEncoder encoder)
     {
-        int pixels = encoder.width * encoder.height;
+        int pixels = encoder.Width * encoder.Height;
         int upper = 1;
         while (upper < Pixels.Length - 1 && pixels > Pixels[upper])
             upper++;
         float sizeBlend = Mathf.InverseLerp(Pixels[upper - 1], Pixels[upper], pixels);
-        float quality = Mathf.Clamp(encoder.quality, 60, 80);
+        float quality = Mathf.Clamp(encoder.Quality, 60, 80);
         int qualityIndex = quality < 70 ? 0 : 1;
         float qualityBlend = (quality - (60 + qualityIndex * 10)) / 10;
-        int group = (encoder.format == ImageEncodingFormat.AVIF ? 0 : 2) + (encoder.subsampleChroma ? 0 : 1);
+        int group = (encoder.Format == ImageEncodingFormat.AVIF ? 0 : 2) + (encoder.SubsampleChroma ? 0 : 1);
         int lowerRow = group * Pixels.Length * 3 + (upper - 1) * 3 + qualityIndex;
         int upperRow = lowerRow + 3;
         EditorGUILayout.Space();

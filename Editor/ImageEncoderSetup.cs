@@ -66,77 +66,110 @@ public static class ImageEncoderSetup
 
     public static void Configure(ImageEncoder encoder)
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode || InputError(encoder.inputTexture) != "" ||
-            encoder.ConfigurationError() != "")
-            return;
+        if (EditorApplication.isPlayingOrWillChangePlaymode || encoder.GetConfigurationError() != "") return;
         Undo.RecordObject(encoder, "Configure image encoder");
-        if (encoder.format == ImageEncodingFormat.AVIF)
+        var settings = new SerializedObject(encoder);
+        var avif = settings.FindProperty("avifEncoder").objectReferenceValue as AvifEncoder;
+        var jpeg = settings.FindProperty("jpegEncoder").objectReferenceValue as JpegEncoder;
+        if (encoder.Format == ImageEncodingFormat.AVIF)
         {
-            if (!encoder.avifEncoder)
+            if (!avif)
             {
                 AvifEncoderSetup.Create();
-                encoder.avifEncoder = Selection.activeGameObject.GetComponent<AvifEncoder>();
-                encoder.avifEncoder.transform.SetParent(encoder.transform, false);
+                avif = Selection.activeGameObject.GetComponent<AvifEncoder>();
+                avif.transform.SetParent(encoder.transform, false);
+                settings.FindProperty("avifEncoder").objectReferenceValue = avif;
             }
-            var avif = encoder.avifEncoder;
-            if (avif.width != encoder.width || avif.height != encoder.height ||
-                avif.subsampleChroma != encoder.subsampleChroma)
-                AvifEncoderSetup.Configure(avif, encoder.width, encoder.height, encoder.quality,
-                                           AvifProcessingLoad.Normal, encoder.subsampleChroma);
-            avif.quality = encoder.quality;
+            if (avif.width != encoder.Width || avif.height != encoder.Height ||
+                avif.subsampleChroma != encoder.SubsampleChroma || !avif.gpuTransform.materialSource ||
+                !avif.gpuEntropy.materialSource)
+                AvifEncoderSetup.Configure(avif, encoder.Width, encoder.Height, encoder.Quality,
+                                           AvifProcessingLoad.Normal, encoder.SubsampleChroma);
+            avif.quality = encoder.Quality;
             avif.gameObject.hideFlags = HideFlags.HideInHierarchy;
             avif.gameObject.SetActive(true);
             UdonSharpEditorUtility.CopyProxyToUdon(avif);
         }
         else
         {
-            if (!encoder.jpegEncoder)
+            if (!jpeg)
             {
                 AvifEncoderSetup.EnsurePrograms(typeof(JpegEncoder));
                 var implementation = new GameObject("JPEG encoder");
                 Undo.RegisterCreatedObjectUndo(implementation, "Create JPEG encoder");
                 implementation.transform.SetParent(encoder.transform, false);
-                encoder.jpegEncoder = implementation.AddUdonSharpComponent<JpegEncoder>();
-                JpegCodecSetup.Configure(encoder.jpegEncoder);
+                jpeg = implementation.AddUdonSharpComponent<JpegEncoder>();
+                settings.FindProperty("jpegEncoder").objectReferenceValue = jpeg;
             }
-            var jpeg = encoder.jpegEncoder;
+            CodecAssetOwnership.DetachSharedAssets(jpeg, "Assets/ImageCodecGenerated");
+            JpegCodecSetup.Configure(jpeg);
             var texture = jpeg.inputTexture as RenderTexture;
             if (!texture)
             {
                 const string directory = "Assets/ImageCodecGenerated";
                 Directory.CreateDirectory(directory);
-                texture = new RenderTexture(encoder.width, encoder.height, 0, RenderTextureFormat.ARGBHalf,
+                texture = new RenderTexture(encoder.Width, encoder.Height, 0, RenderTextureFormat.ARGBHalf,
                                             RenderTextureReadWrite.Linear);
                 texture.name = "Encoding input";
                 AssetDatabase.CreateAsset(
                     texture, AssetDatabase.GenerateUniqueAssetPath(directory + "/Input.renderTexture"));
             }
-            if (texture.width != encoder.width || texture.height != encoder.height)
+            if (texture.width != encoder.Width || texture.height != encoder.Height)
             {
                 texture.Release();
-                texture.width = encoder.width;
-                texture.height = encoder.height;
+                texture.width = encoder.Width;
+                texture.height = encoder.Height;
             }
             texture.filterMode = FilterMode.Bilinear;
             jpeg.inputTexture = texture;
-            jpeg.width = encoder.width;
-            jpeg.height = encoder.height;
-            jpeg.quality = encoder.quality;
-            jpeg.subsampleChroma = encoder.subsampleChroma;
+            jpeg.width = encoder.Width;
+            jpeg.height = encoder.Height;
+            jpeg.quality = encoder.Quality;
+            jpeg.subsampleChroma = encoder.SubsampleChroma;
             jpeg.gameObject.hideFlags = HideFlags.HideInHierarchy;
             jpeg.gameObject.SetActive(true);
             EditorUtility.SetDirty(texture);
             UdonSharpEditorUtility.CopyProxyToUdon(jpeg);
         }
-        if (encoder.avifEncoder)
-            encoder.avifEncoder.gameObject.SetActive(encoder.format == ImageEncodingFormat.AVIF);
-        if (encoder.jpegEncoder)
-            encoder.jpegEncoder.gameObject.SetActive(encoder.format == ImageEncodingFormat.JPEG);
+        if (avif) avif.gameObject.SetActive(encoder.Format == ImageEncodingFormat.AVIF);
+        if (jpeg) jpeg.gameObject.SetActive(encoder.Format == ImageEncodingFormat.JPEG);
+        settings.ApplyModifiedProperties();
         UdonSharpEditorUtility.CopyProxyToUdon(encoder);
         EditorUtility.SetDirty(encoder);
         EditorSceneManager.MarkSceneDirty(encoder.gameObject.scene);
         AssetDatabase.SaveAssets();
         Selection.activeGameObject = encoder.gameObject;
+    }
+
+    // Editor integrations use the same serialized settings as the Inspector, then generate resources.
+    public static void Configure(ImageEncoder encoder, RenderTexture input, ImageEncodingFormat format,
+                                 int width, int height, int quality = 60, bool subsampleChroma = true)
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+        var settings = new SerializedObject(encoder);
+        settings.FindProperty("inputTexture").objectReferenceValue = input;
+        settings.FindProperty("format").intValue = (int)format;
+        settings.FindProperty("width").intValue = width;
+        settings.FindProperty("height").intValue = height;
+        settings.FindProperty("quality").intValue = quality;
+        settings.FindProperty("subsampleChroma").boolValue = subsampleChroma;
+        settings.ApplyModifiedProperties();
+        Configure(encoder);
+    }
+
+    public static bool NeedsConfiguration(ImageEncoder encoder)
+    {
+        var settings = new SerializedObject(encoder);
+        if (encoder.Format == ImageEncodingFormat.AVIF)
+        {
+            var avif = settings.FindProperty("avifEncoder").objectReferenceValue as AvifEncoder;
+            return !avif || avif.width != encoder.Width || avif.height != encoder.Height ||
+                   avif.subsampleChroma != encoder.SubsampleChroma || !avif.gpuTransform.materialSource ||
+                   !avif.gpuEntropy.materialSource;
+        }
+        var jpeg = settings.FindProperty("jpegEncoder").objectReferenceValue as JpegEncoder;
+        return !jpeg || jpeg.width != encoder.Width || jpeg.height != encoder.Height ||
+               jpeg.subsampleChroma != encoder.SubsampleChroma || !jpeg.materialSource;
     }
 }
 }

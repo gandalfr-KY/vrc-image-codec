@@ -33,22 +33,15 @@ public class ImageEncoderInspector : UnityEditor.Editor
             quality.intValue = EditorGUILayout.IntSlider("Quality", quality.intValue, 1, 100);
         }
         bool changed = serializedObject.ApplyModifiedProperties();
-        string error = resolutionError != "" ? resolutionError : encoder.ConfigurationError();
+        string error = resolutionError != "" ? resolutionError : encoder.GetConfigurationError();
         if (error != "")
         {
-            EditorGUILayout.HelpBox(error, encoder.inputTexture ? MessageType.Error : MessageType.Info);
+            EditorGUILayout.HelpBox(error, encoder.InputTexture ? MessageType.Error : MessageType.Info);
             return;
         }
         ImageEncodingEstimates.Draw(encoder);
-        bool needsConfiguration = encoder.format == ImageEncodingFormat.AVIF
-                                      ? !encoder.avifEncoder || encoder.avifEncoder.width != encoder.width ||
-                                            encoder.avifEncoder.height != encoder.height ||
-                                            encoder.avifEncoder.subsampleChroma != encoder.subsampleChroma
-                                      : !encoder.jpegEncoder || encoder.jpegEncoder.width != encoder.width ||
-                                            encoder.jpegEncoder.height != encoder.height ||
-                                            encoder.jpegEncoder.subsampleChroma != encoder.subsampleChroma;
-        if (!EditorApplication.isPlayingOrWillChangePlaymode && (changed || needsConfiguration) &&
-            !configurationQueued)
+        if (!EditorApplication.isPlayingOrWillChangePlaymode &&
+            (changed || ImageEncoderSetup.NeedsConfiguration(encoder)) && !configurationQueued)
         {
             // Configure after Inspector drawing; resource generation can import assets and compile Udon.
             configurationQueued = true;
@@ -58,7 +51,7 @@ public class ImageEncoderInspector : UnityEditor.Editor
                 if (encoder) ImageEncoderSetup.Configure(encoder);
             };
         }
-        if (encoder.error != "") EditorGUILayout.HelpBox(encoder.error, MessageType.Error);
+        if (encoder.LastError != "") EditorGUILayout.HelpBox(encoder.LastError, MessageType.Error);
     }
     private string DrawResolution(RenderTexture input)
     {

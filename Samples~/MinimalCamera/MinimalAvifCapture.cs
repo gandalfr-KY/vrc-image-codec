@@ -2,20 +2,19 @@ using UdonSharp;
 using UnityEngine;
 using VrcImageCodec;
 
-namespace VrcAvif.Encoder.Samples
+namespace VrcImageCodec.Samples
 {
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class MinimalAvifCapture : UdonSharpBehaviour
 {
     public Camera source;
-    public AvifEncoder encoder;
+    public ImageEncoder encoder;
 
     public void Capture()
     {
-        if (encoder.busy || encoder.gpuEntropy.readbackPending)
-            return;
+        if (encoder.IsBusy || encoder.HasPendingReadback) return;
         source.enabled = false;
-        source.targetTexture = encoder.gpuTransform.inputTexture;
+        source.targetTexture = encoder.InputTexture;
         source.Render();
         encoder.BeginEncoding();
     }

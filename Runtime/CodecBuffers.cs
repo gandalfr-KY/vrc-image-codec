@@ -9,6 +9,14 @@ public static class CodecBuffers
     public const int ByteTextureColumns = 1024;
     public const int LengthPrefixBytes = 4;
 
+    // Allocate working storage from an Editor layout without copying its pixels.
+    public static RenderTexture AllocateLike(RenderTexture layout)
+    {
+        var texture = Surface(null, layout.width, layout.height, layout.format, layout.sRGB);
+        texture.filterMode = layout.filterMode;
+        return texture;
+    }
+
     public static RenderTexture EncodedOutput(RenderTexture previous, int encodedBytes,
                                               RenderTextureFormat format)
     {
